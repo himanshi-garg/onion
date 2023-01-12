@@ -7,11 +7,9 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.backends.backend_pdf
 import itertools
-import cv2
 import math
 
 from astropy.io import fits
-from alive_progress import alive_bar
 from time import sleep
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
@@ -24,6 +22,7 @@ from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
 from matplotlib.patches import Ellipse
+from skimage.transform import warp_polar #, rotate
 
 import matplotlib.cm as cm
 import cmasher as cmr
@@ -93,6 +92,7 @@ class EXTRACT:
         rms = np.nanstd(cube)
         self.cube = cube
         self.rms = rms
+        print(f'rms [{self.unit}] =', rms)
 
         # systemic velocity
         print('extracting systemic velocity')
@@ -235,44 +235,30 @@ class EXTRACT:
         tchans = channels[np.where(self.line_profile > 10*trms)]
         beam = self.bmaj/self.pixelscale
 
-        surfaces = np.full([self.nv,int(self.Rout),4,2], None)
-        intensity = np.full([self.nv,int(self.Rout),4], None)
+        surfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,2], None)
+        intensity = np.full([self.nv,(self.Rout+1).astype(np.int),4], None)
 
-        rms = np.nanstd(self.cube[0,:,:])
+        phi = np.deg2rad(np.arange(0,360,1))
+        phi[phi > np.pi] -= 2*np.pi
+        rad = np.arange(1, self.Rout.astype(np.int), 1)
         
         for i in tchans:
-            i += 20
+
             chan = self.cube[i,:,:]
+            #chan_rot = rotate(chan, angle=self.nearside-180, center=(self.com[1],self.com[0])) #byte size error with Pandas
             chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
-
-            x,y = np.meshgrid(np.arange(self.nx)-self.com[1], np.arange(self.ny)-self.com[0])
-            r = np.hypot(x,y).astype(np.int)
-            theta = np.arctan2(y,x)
-            rad = np.arange(1, self.Rout.astype(np.int), 1)
-
-            grad0 = np.full([4], None)
+            polar = warp_polar(chan_rot, center=(self.com[1],self.com[0]), radius=self.Rout)
+            
+            grad0 = np.full([4,2], None)
             coord0 = np.full([4,2], None)
             coord0[:,:] = [self.com[0],self.com[1]]
             
             for k in rad:
-                k += 50
-                mask = (np.greater(r,k-1) & np.less(r,i+1))
-                arr1, arr2 = chan_rot[mask], theta[mask]
-                phi, annuli = npi.group_by(arr2).mean(arr1)
-                #print(phi)
-                #annuli = annuli[np.argsort(phi)]
-                #phi = phi[np.argsort(phi)]
-                #print(phi)
                 
-                peaks, properties = _peak_finder(annuli, height=3*rms, distance=beam, prominence=2*rms, width=0.5*beam)
-                sorted_peaks = peaks[np.argsort(annuli[peaks])][::-1]                
-
-                print(phi[sorted_peaks])
-                plt.figure(1)
-                plt.plot(phi, annuli, '-')
-                plt.plot(phi[sorted_peaks], annuli[sorted_peaks], '.')
-                plt.show()
-                sys.exit()
+                annuli = polar[:,k]
+              
+                peaks, properties = _peak_finder(annuli, height=5*self.rms, distance=beam, prominence=3*self.rms, width=0.5*beam)
+                sorted_peaks = peaks[np.argsort(annuli[peaks])][::-1]
 
                 if len(sorted_peaks) >= 2:
                     if np.all(phi[sorted_peaks[:2]] > np.pi/2):
@@ -298,30 +284,38 @@ class EXTRACT:
                     intensity[i,k,3] = chan_rot[near_lo[1].astype(int),near_lo[0].astype(int)]
 
                 # removing discontinuous points
-                '''
+                
                 for vx in range(4):
                     
                     if surfaces[i,k,vx,:].all():
-                        grad = (surfaces[i,k,vx,0] - coord0[vx,0]) / (surfaces[i,k,vx,1] - coord0[vx,1])
-                        grad = abs(grad)
+                        grady = surfaces[i,k,vx,0] / coord0[vx,0]
+                        gradx = surfaces[i,k,vx,1] / coord0[vx,1]
                         
-                        if grad0[vx] is not None:
-                            volatility = np.std([np.log(grad),np.log(grad0[vx])])
-                            grad0[vx] = grad
-                            coord0[vx,:] = surfaces[i,k,vx,:] 
-                        
-                            if volatility > 0.10:
+                        if grad0[vx,:].all():
+                            meany = np.mean([np.log(grady),np.log(grad0[vx,0])])
+                            meanx = np.mean([np.log(gradx),np.log(grad0[vx,1])])
+                            cam = (meanx + meany) / 2.
+                            d1 = meany - cam
+                            d2 = meanx - cam
+                            voly = np.std([np.log(grady),np.log(grad0[vx,0])])
+                            volx = np.std([np.log(gradx),np.log(grad0[vx,1])])
+                            volatility = np.sqrt((np.square(voly) + np.square(volx) + np.square(d1) + np.square(d2)) / 2.)
+                            
+                            if volatility > 0.05:
                                 surfaces[i,k,vx,:] = None
                                 intensity[i,k,vx] = None
-
+                            else:
+                               grad0[vx,:] = [grady,gradx]
+                               coord0[vx,:] = surfaces[i,k,vx,:]  
                         else:
-                            grad0[vx] = grad
-                            coord0[vx,:] = surfaces[i,k,vx,:]
+                            grad0[vx,:] = [grady,gradx]
 
-                for vx in range(2):
-                    if surfaces[i,k,vx+0,:] is None or surfaces[i,k,vx+1,:] is None:
-                        surfaces[i,k,:vx+2,:] = None
-                '''
+                if np.any(surfaces[i,k,:2,:] == None):
+                    surfaces[i,k,:2,:] = None
+                if np.any(surfaces[i,k,2:4,:] == None):
+                    surfaces[i,k,2:4,:] = None
+                    
+                    
         self.surfaces = surfaces
         self.intensity = intensity
         self.tchans = tchans
@@ -331,9 +325,9 @@ class EXTRACT:
 
         print('PLOTTING TRACED LAYERS')
             
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_2.pdf')
 
-        for i in self.tchans:      
+        for i in tqdm(self.tchans, total=len(self.tchans)):      
             fig, ax = plt.subplots(figsize=(6,6))
 
             chan = self.cube[i,:,:]
@@ -393,27 +387,6 @@ def _pol2cart(radius, angle, cx=0, cy=0):
     y = radius * np.sin(angle) + cy
     
     return [y,x]
-
-
-def topolar(img, order=1):
-   
-    max_radius = 0.5*np.linalg.norm( img.shape )
-
-    def transform(coords):
-        
-        theta = 2*np.pi*coords[1] / (img.shape[1] - 1.)
-        radius = max_radius * coords[0] / img.shape[0]
-
-        i = 0.5*img.shape[0] - radius*np.sin(theta)
-        j = radius*np.cos(theta) + 0.5*img.shape[1]
-        return i,j
-
-    polar = geometric_transform(img, transform, order=order)
-
-    rads = max_radius * np.linspace(0,1,img.shape[0])
-    angs = np.linspace(0, 2*np.pi, img.shape[1])
-
-    return polar, (angs, rads)
 
 
 def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
