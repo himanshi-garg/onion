@@ -22,7 +22,7 @@ from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
 from matplotlib.patches import Ellipse
-from skimage.transform import warp_polar #, rotate
+from skimage.transform import warp_polar
 
 import matplotlib.cm as cm
 import cmasher as cmr
@@ -37,8 +37,8 @@ class EXTRACT:
                                 
         self._fits_info(fits_file)
         self._compute_geometric_parameters()
-        self._trace_surface()
-        self._plot_surfaces()
+        #self._trace_surface()
+        #self._plot_surfaces()
         #self._extract_surface_info()
 
         return
@@ -50,6 +50,7 @@ class EXTRACT:
         hdu = fits.open(self.filename)
 
         # header
+        #print(repr(hdu[0].header))
         self.source = hdu[0].header['OBJECT']
         
         self.nx = hdu[0].header['NAXIS1']
@@ -61,8 +62,10 @@ class EXTRACT:
         self.bmaj = hdu[0].header['BMAJ'] * 3600 
         self.bmin = hdu[0].header['BMIN'] * 3600
         self.bpa = hdu[0].header['BPA']
-
-        self.unit = hdu[0].header['BUNIT']
+        # angle unit
+        self.aunit = hdu[0].header['CUNIT1']
+        # intensity unit
+        self.iunit = hdu[0].header['BUNIT'] 
         self.restfreq = hdu[0].header['RESTFRQ']
 
         if hdu[0].header['CTYPE3'] == 'VRAD':
@@ -92,7 +95,7 @@ class EXTRACT:
         rms = np.nanstd(cube)
         self.cube = cube
         self.rms = rms
-        print(f'rms [{self.unit}] =', rms)
+        print(f'rms [{self.iunit}] =', rms)
 
         # systemic velocity
         print('extracting systemic velocity')
@@ -159,7 +162,7 @@ class EXTRACT:
         self.Rout = Rout
 
         # plotting figures
-        '''
+        
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf')
 
         # line profile for systemic velocity
@@ -167,7 +170,7 @@ class EXTRACT:
         ax.plot(line_profile, color='black', linewidth=1.0)
         ax.plot(vsyst_idx, line_profile[vsyst_idx], '.', markersize=10, color='red', label=f'v_syst = {self.vsyst} m/s')
         ax.legend(loc='upper right', fontsize=7)
-        ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.unit}]', title='systemic velocity')
+        ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.iunit}]', title='systemic velocity')
         pdf.savefig(fig, bbox_inches='tight')
         plt.close(fig)
 
@@ -210,21 +213,25 @@ class EXTRACT:
         cbar.locator = tick_locator
         cbar.update_ticks()
         cbar.set_label('$\Delta$v [kms$^{-1}$]', labelpad=9, fontsize=12, weight='bold')
-        major_axis = [self.com[1]-(self.nx/2)*np.cos(np.radians(self.PA+90)), self.com[1]+(self.nx/2)*np.cos(np.radians(self.PA+90)),
-                      self.com[0]-(self.ny/2)*np.sin(np.radians(self.PA+90)), self.com[0]+(self.ny/2)*np.sin(np.radians(self.PA+90))]
-        minor_axis = [self.com[1]-(self.nx/2)*np.cos(np.radians(self.PA)), self.com[1]+(self.nx/2)*np.cos(np.radians(self.PA)),
-                      self.com[0]-(self.ny/2)*np.sin(np.radians(self.PA)), self.com[0]+(self.ny/2)*np.sin(np.radians(self.PA))]
+        major_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA+90))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA+90))),
+                      self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA+90)))]
+        minor_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA))),
+                      self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA)))]
         ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'PA = {self.PA}$^\circ$')
-        ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'minor axis = {self.PA-90}$^\circ$')
-        near = [minor_axis[0],minor_axis[2]] if 0 < self.nearside < 90 else [minor_axis[1],minor_axis[3]]
-        rotate = self.nearside+90 if self.nearside<0 else self.nearside-90 if self.nearside>0 else self.nearside
-        ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rotate)
+        if self.PA < 180:
+            near = self.PA + 90
+        else:
+            near = self.PA - 90
+        ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'minor axis = {near}$^\circ$')
+        near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
+        rot = self.nearside-180 if self.nearside > 90 else self.nearside
+        ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
         ax.legend(loc='best', fontsize=7)
         pdf.savefig(fig, bbox_inches='tight')
         plt.close(fig)
         
         pdf.close()
-        '''
+        
         
     def _trace_surface(self):
 
@@ -245,7 +252,6 @@ class EXTRACT:
         for i in tchans:
 
             chan = self.cube[i,:,:]
-            #chan_rot = rotate(chan, angle=self.nearside-180, center=(self.com[1],self.com[0])) #byte size error with Pandas
             chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
             polar = warp_polar(chan_rot, center=(self.com[1],self.com[0]), radius=self.Rout)
             
@@ -284,7 +290,7 @@ class EXTRACT:
                     intensity[i,k,3] = chan_rot[near_lo[1].astype(int),near_lo[0].astype(int)]
 
                 # removing discontinuous points
-                
+                '''
                 for vx in range(4):
                     
                     if surfaces[i,k,vx,:].all():
@@ -301,7 +307,7 @@ class EXTRACT:
                             volx = np.std([np.log(gradx),np.log(grad0[vx,1])])
                             volatility = np.sqrt((np.square(voly) + np.square(volx) + np.square(d1) + np.square(d2)) / 2.)
                             
-                            if volatility > 0.05:
+                            if volatility > 0.1:
                                 surfaces[i,k,vx,:] = None
                                 intensity[i,k,vx] = None
                             else:
@@ -314,7 +320,7 @@ class EXTRACT:
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-                    
+                '''    
                     
         self.surfaces = surfaces
         self.intensity = intensity
@@ -325,7 +331,15 @@ class EXTRACT:
 
         print('PLOTTING TRACED LAYERS')
             
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_2.pdf')
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
+        bmin = self.bmin/self.pixelscale
+        bmaj = self.bmaj/self.pixelscale
+        if self.aunit == 'deg':
+            bpa = self.bpa
+        elif self.aunit == 'rad':
+            bpa = np.rad2deg(self.bpa)
+        else:
+            raise ValueError("unknown angle units:", self.aunit)
 
         for i in tqdm(self.tchans, total=len(self.tchans)):      
             fig, ax = plt.subplots(figsize=(6,6))
@@ -333,17 +347,20 @@ class EXTRACT:
             chan = self.cube[i,:,:]
             chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
 
-            fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.voltage, vmin=0, vmax=np.nanmax(chan_rot))
+            fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(chan_rot))
             ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
             ax.set(xlabel='pixels', ylabel='pixels')
 
-            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=1.5, color='green', label='upper far side')
-            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=1.5, color='orange', label='upper near side')
-            #ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=1.5, color='lime', label='lower far side')
-            #ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=1.5, color='yellow', label='lower near side')
+            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='blueviolet', label='upper far side')
+            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='darkorange', label='upper near side')
+            ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='violet', label='lower far side')
+            ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='gold', label='lower near side')
             ax.legend(loc='upper right', fontsize=7)
-
-            beam = Ellipse(xy=(self.nx/6, self.ny/6), width=self.bmin/self.pixelscale, height=self.bmaj/self.pixelscale, angle=-self.bpa, fill=True, color='white')
+            bounds = self.Rout*1.1
+            ax.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
+            
+            beam = Ellipse(xy=(self.com[1]-self.Rout,self.com[0]-self.Rout), width=bmin, height=bmaj, angle=-bpa, fill=True, color='white')
+            ax.add_patch(beam)
             
             divider = make_axes_locatable(ax)
             colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
@@ -353,7 +370,7 @@ class EXTRACT:
             tick_locator = ticker.MaxNLocator(nbins=5)
             cbar.locator = tick_locator
             cbar.update_ticks()
-            cbar.set_label(f'flux [{self.unit}]', labelpad=9, fontsize=12, weight='bold')
+            cbar.set_label(f'flux [{self.iunit}]', labelpad=9, fontsize=12, weight='bold')
         
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
@@ -413,7 +430,6 @@ def _center_of_mass(img, beam=None):
     
     img = abs(img)
 
-    # denoising image
     img_gray = np.nan_to_num(img)
     img_gray[img_gray != 0] = 1
     footprint = morphology.disk(beam)
@@ -459,12 +475,53 @@ def _center_of_mass(img, beam=None):
 
 def _position_angle(img, cx=None, cy=None, beam=None):
 
-    # denoising image
     img_gray = np.nan_to_num(img)
     img_gray[img_gray != 0] = 1
     footprint = morphology.disk(beam)
     res = morphology.white_tophat(img_gray, footprint)
     img[res == 1] = None
+    '''
+    x,y = np.meshgrid(np.arange(img.shape[1]) - cx, np.arange(img.shape[0]) - cy)
+    R = np.hypot(x,y)
+    R[np.isnan(img)] = None
+    Rout = np.nanmax(R)
+
+    phi = np.deg2rad(np.arange(0,360,1))
+    
+    rad = np.arange(1, Rout.astype(np.int), 1)
+    polar = warp_polar(img, center=(cx,cy), radius=Rout)
+
+    semimajor = []
+    near = []
+    
+    for i in rad:
+        
+        annuli = polar[:,i]
+        red_max = phi[np.nanargmax(annuli)]
+        blue_max = phi[np.nanargmin(annuli)]
+        #print(np.rad2deg(red_max), np.rad2deg(blue_max))
+        if i == 50:
+            plt.plot(annuli)
+            print(np.rad2deg(red_max), np.rad2deg(blue_max))
+            plt.show()
+            sys.exit()
+
+        if red_max > blue_max:
+            theta = np.average([red_max, blue_max + np.pi])
+        elif red_max < blue_max:
+            theta = np.average([red_max, blue_max - np.pi])
+        theta -= np.pi/2
+        semimajor.append(theta)
+
+        bend = np.average([red_max, blue_max])
+        if abs(red_max - bend) < np.pi/2:
+            if bend < np.pi:
+                bend += np.pi
+            elif bend > np.pi:
+                bend -= np.pi
+        bend -= np.pi/2
+        near.append(bend)  
+    '''
     
     x,y = np.meshgrid(np.arange(img.shape[1]) - cx, np.arange(img.shape[0]) - cy)
     R = np.hypot(x,y)
@@ -483,6 +540,7 @@ def _position_angle(img, cx=None, cy=None, beam=None):
 
     for i in rad:
         mask = (np.greater(R, i - 1) & np.less(R, i + 1)) | ~np.isnan(img)
+        masked_img = img[mask]
         masked_theta = theta[mask]
         masked_redside = redside[mask]
         masked_blueside = blueside[mask]
@@ -491,23 +549,29 @@ def _position_angle(img, cx=None, cy=None, beam=None):
             theta_max_redside = masked_theta[np.nanargmax(masked_redside)]
             theta_max_blueside = masked_theta[np.nanargmin(masked_blueside)]
 
-            bend = np.average([theta_max_redside, theta_max_blueside]) - (np.pi/2)
+            bend = np.average([theta_max_redside, theta_max_blueside])
+            if abs(theta_max_redside - bend) < np.pi/2:
+                if bend < np.pi:
+                    bend += np.pi
+                elif bend > np.pi:
+                    bend -= np.pi
+            bend -= np.pi/2
+            near.append(bend)
             
             if theta_max_redside > theta_max_blueside:
                 theta_max = np.average([theta_max_redside, theta_max_blueside + np.pi])
             elif theta_max_redside < theta_max_blueside:
                 theta_max = np.average([theta_max_redside, theta_max_blueside - np.pi])
-                if bend > np.pi/2:
-                    bend -= np.pi
             theta_max -= np.pi/2
-
-            near.append(bend)
             semimajor.append(theta_max)
             
+    Rout = np.nanmax(R)
+    
+   
     PA = np.rad2deg(np.average(semimajor))
     
     nearside = np.rad2deg(np.average(near))
-
-    return PA, nearside, np.nanmax(R)
+    
+    return PA, nearside, Rout
 
 
