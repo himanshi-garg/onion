@@ -27,7 +27,7 @@ from skimage.transform import warp_polar
 import matplotlib.cm as cm
 import cmasher as cmr
 
-#np.set_printoptions(threshold=np.inf)
+np.set_printoptions(threshold=np.inf)
 
 ###################################################################################################
 
@@ -37,7 +37,7 @@ class EXTRACT:
                                 
         self._fits_info(fits_file)
         self._compute_geometric_parameters()
-        #self._trace_surface()
+        self._trace_surface()
         #self._plot_surfaces()
         #self._extract_surface_info()
 
@@ -162,7 +162,7 @@ class EXTRACT:
         self.Rout = Rout
 
         # plotting figures
-        
+        '''
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf')
 
         # line profile for systemic velocity
@@ -231,7 +231,7 @@ class EXTRACT:
         plt.close(fig)
         
         pdf.close()
-        
+        '''
         
     def _trace_surface(self):
 
@@ -275,8 +275,8 @@ class EXTRACT:
                         near_up = _pol2cart(k, np.min(phi[sorted_peaks[:2]]), cx=self.com[1], cy=self.com[0])
                     surfaces[i,k,0,:] = far_up
                     surfaces[i,k,1,:] = near_up
-                    intensity[i,k,0] = chan_rot[far_up[1].astype(int),far_up[0].astype(int)]
-                    intensity[i,k,1] = chan_rot[near_up[1].astype(int),near_up[0].astype(int)]
+                    intensity[i,k,0] = chan_rot[far_up[0].astype(int),far_up[1].astype(int)]
+                    intensity[i,k,1] = chan_rot[near_up[0].astype(int),near_up[1].astype(int)]
                 if len(sorted_peaks) >= 4:
                     if np.all(phi[sorted_peaks[2:4]] > np.pi/2):
                         far_lo = _pol2cart(k, np.min(phi[sorted_peaks[2:4]]), cx=self.com[1], cy=self.com[0])
@@ -286,28 +286,31 @@ class EXTRACT:
                         near_lo = _pol2cart(k, np.min(phi[sorted_peaks[2:4]]), cx=self.com[1], cy=self.com[0])
                     surfaces[i,k,2,:] = far_lo
                     surfaces[i,k,3,:] = near_lo
-                    intensity[i,k,2] = chan_rot[far_lo[1].astype(int),far_lo[0].astype(int)]
-                    intensity[i,k,3] = chan_rot[near_lo[1].astype(int),near_lo[0].astype(int)]
+                    intensity[i,k,2] = chan_rot[far_lo[0].astype(int),far_lo[1].astype(int)]
+                    intensity[i,k,3] = chan_rot[near_lo[0].astype(int),near_lo[1].astype(int)]
 
                 # removing discontinuous points
                 '''
                 for vx in range(4):
                     
                     if surfaces[i,k,vx,:].all():
-                        grady = surfaces[i,k,vx,0] / coord0[vx,0]
-                        gradx = surfaces[i,k,vx,1] / coord0[vx,1]
+                        grady = abs(surfaces[i,k,vx,0] - coord0[vx,0])
+                        gradx = abs(surfaces[i,k,vx,1] - coord0[vx,1]) 
                         
                         if grad0[vx,:].all():
-                            meany = np.mean([np.log(grady),np.log(grad0[vx,0])])
-                            meanx = np.mean([np.log(gradx),np.log(grad0[vx,1])])
+                            meany = np.mean([grady, grad0[vx,0]])
+                            meanx = np.mean([gradx, grad0[vx,1]])
                             cam = (meanx + meany) / 2.
                             d1 = meany - cam
                             d2 = meanx - cam
-                            voly = np.std([np.log(grady),np.log(grad0[vx,0])])
-                            volx = np.std([np.log(gradx),np.log(grad0[vx,1])])
-                            volatility = np.sqrt((np.square(voly) + np.square(volx) + np.square(d1) + np.square(d2)) / 2.)
+                            voly = np.std([grady, grad0[vx,0]]) 
+                            volx = np.std([gradx, grad0[vx,1]]) 
+                            volatility = np.sqrt((np.square(voly) + np.square(volx) + np.square(d1) + np.square(d2)) / 2.) 
+
+                            if i == tchans[19]:
+                                print(grady, gradx, volatility)
                             
-                            if volatility > 0.1:
+                            if volatility > 90:
                                 surfaces[i,k,vx,:] = None
                                 intensity[i,k,vx] = None
                             else:
@@ -320,8 +323,8 @@ class EXTRACT:
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-                '''    
-                    
+                '''
+            
         self.surfaces = surfaces
         self.intensity = intensity
         self.tchans = tchans
@@ -347,7 +350,7 @@ class EXTRACT:
             chan = self.cube[i,:,:]
             chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
 
-            fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(chan_rot))
+            fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(self.cube))
             ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
             ax.set(xlabel='pixels', ylabel='pixels')
 
@@ -364,7 +367,7 @@ class EXTRACT:
             
             divider = make_axes_locatable(ax)
             colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
-            cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax, extend='both')
+            cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax)#, extend='both')
             cbar.ax.tick_params(labelsize=8)
             cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
             tick_locator = ticker.MaxNLocator(nbins=5)
@@ -377,6 +380,124 @@ class EXTRACT:
         
         pdf.close()
 
+
+    def _extract_surface_info(self):
+
+        #with open('poop.csv', 'a+') as f:
+        #    Save = np.savetxt(f, self.surfaces[133,:,0,:], delimiter=',', fmt='%s')
+        #    Save = np.savetxt(f, self.surfaces[133,:,1,:], delimiter=',', fmt='%s')
+
+        y_mean = np.full([self.nv,(self.Rout+1).astype(np.int),4], None)
+                    
+        self.inc = 30.3
+
+        rad = np.arange(1, self.Rout.astype(np.int), 1)
+        
+        r_up, h_up, v_up, I_up = [], [], [], []
+        r_lo, h_lo, v_lo, I_lo = [], [], [], []
+
+        if self.PA < self.nearside:
+            v_rot = -1
+        else:
+            v_rot = 1
+
+        #for i in self.tchans:
+        for i in range(1):
+            i = self.tchans[43]
+            for k in rad:
+                if np.all(self.surfaces[i,k,:2,:] != None):
+                    h = abs(np.mean(self.surfaces[i,k,:2,0]) - self.com[0]) / np.sin(np.radians(self.inc))
+                    r = np.hypot(np.mean(self.surfaces[i,k,0,1]) - self.com[1], (self.surfaces[i,k,0,0] - np.mean(self.surfaces[i,k,:2,0])) / np.cos(np.radians(self.inc)))
+                    v = (self.velocity[i] - self.vsyst) * r / ((np.mean(self.surfaces[i,k,0,1]) - self.com[1]) * np.sin(np.radians(self.inc)))
+                    v *= v_rot
+                    I = np.nanmean(self.intensity[i,k,:2])
+
+                    r *= self.pixelscale
+                    h *= self.pixelscale
+                    
+                    '''
+                    h_front = abs(np.mean(self.y_surf[:,:,:2], axis=2) - self.y_c) / np.sin(inc_rad)
+                    h_front *= self.cube.pixelscale
+                    r_front = np.hypot(self.x_surf - self.x_c, (self.y_surf[:,:,1] - np.mean(self.y_surf[:,:,:2], axis=2)) / np.cos(inc_rad))
+                    r_front *= self.cube.pixelscale 
+                    v_front = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r_front / ((self.x_surf - self.x_c) * np.sin(inc_rad))
+                    Bv_front = np.mean(self.Bv_surf[:,:,:2], axis=2)
+                    '''
+                    if v == np.inf or v == np.nan or v < 0 or h < 0:
+                        continue
+                    else:
+                        r_up.append(r)
+                        h_up.append(h)
+                        v_up.append(v)
+                        I_up.append(I)
+        '''               
+        for i in self.tchans:
+            for k in rad:
+                if np.all(self.surfaces[i,k,2:4,:] != None):
+                    h = (abs(np.nanmean(self.surfaces[i,k,2:4,0]) - self.com[0]) / np.sin(np.radians(self.inc)))
+                    h *= self.pixelscale
+                    r = np.hypot(np.nanmean(self.surfaces[i,k,2:4,1]) - self.com[1], (self.surfaces[i,k,0,0] - np.nanmean(self.surfaces[i,k,2:4,0])) / np.cos(np.radians(self.inc)))
+                    r *= self.pixelscale
+                    v = (self.velocity[i] - self.vsyst) * r / ((np.nanmean(self.surfaces[i,k,2:4,1]) - self.com[1]) * np.sin(np.radians(self.inc)))
+                    v *= v_rot
+                    I = np.nanmean(self.intensity[i,k,:2])
+
+                    if v == np.inf or v == np.nan or v < 0 or h < 0:
+                        continue
+                    else:
+                        r_lo.append(r)
+                        h_lo.append(h)
+                        v_lo.append(v)
+                        I_lo.append(I)
+        '''    
+        '''
+        # upper surface
+        h_up = (abs(np.nanmean(self.surfaces[:,:,:2,0], axis=2) - self.com[0]) / np.sin(np.radians(self.inc))) * self.pixelscale
+        r_up = np.hypot(np.nanmean(self.surfaces[:,:,:2,1], axis=2) - self.com[1], (self.surfaces[:,:,0,0] - np.nanmean(self.surfaces[:,:,:2,0], axis=2)) / np.cos(np.radians(self.inc)))
+        v_up = (self.velocity[:,np.newaxis] - self.vsyst) * (r_up / ((np.nanmean(self.surfaces[:,:,:2,1], axis=2) - self.com[1]) * np.sin(np.radians(self.inc))))
+        I_up = np.nanmean(self.intensity[:,:,:2], axis=2)
+
+        # lower surface
+        h_lo = (abs(np.nanmean(self.surfaces[:,:,2:4,0], axis=2) - self.com[0]) / np.sin(np.radians(self.inc))) * self.pixelscale
+        r_lo = np.hypot(np.nanmean(self.surfaces[:,:,2:4,1], axis=2) - self.com[1], (self.surfaces[:,:,2,0] - np.nanmean(self.surfaces[:,:,2:4,0], axis=2)) / np.cos(np.radians(self.inc)))
+        v_lo = (self.velocity[:,np.newaxis] - self.vsyst) * (r_lo / ((np.nanmean(self.surfaces[:,:,2:4,1], axis=2) - self.com[1]) * np.sin(np.radians(self.inc))))
+        I_lo = np.nanmean(self.intensity[:,:,2:4], axis=2)
+
+        if self.PA < self.nearside:
+            v_up *= -1
+            v_lo *= -1
+
+        mask1 = np.isinf(v_up) | (h_up < 0)
+        h_up = np.ma.masked_array(h_up,mask1).compressed()
+        r_up = np.ma.masked_array(r_up,mask1).compressed()
+        v_up = np.ma.masked_array(v_up,mask1).compressed()
+        I_up = np.ma.masked_array(I_up,mask1).compressed()
+
+        mask2 = np.isinf(v_lo) | (h_lo < 0)
+        h_lo = np.ma.masked_array(h_lo,mask2).compressed()
+        r_lo = np.ma.masked_array(r_lo,mask2).compressed()
+        v_lo = np.ma.masked_array(v_lo,mask2).compressed()
+        I_lo = np.ma.masked_array(I_lo,mask2).compressed()
+        '''
+        surf_up = [h_up, v_up, I_up]
+        #surf_lo = [h_lo, v_lo, I_lo]
+        ylabels = ['h [arcsec]', 'v [m/s]', f'Int [{self.iunit}]']
+        
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles_3.pdf')
+        for k in range(3):
+        
+            fig, ax = plt.subplots(figsize=(6,6))
+            
+            ax.plot(r_up, surf_up[k], '.', markersize=1, color='black', label='upper surface')
+            #ax.plot(r_lo, surf_lo[k], '.', markersize=1, color='red', label='lower surface')
+            
+            ax.set(xlabel='r [arcsec]', ylabel=ylabels[k])
+            ax.legend(loc='upper right', fontsize=10)
+            
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+            
+        pdf.close()
                         
         
 #################
@@ -566,7 +687,6 @@ def _position_angle(img, cx=None, cy=None, beam=None):
             semimajor.append(theta_max)
             
     Rout = np.nanmax(R)
-    
    
     PA = np.rad2deg(np.average(semimajor))
     
