@@ -35,12 +35,13 @@ np.set_printoptions(threshold=np.inf)
 class EXTRACT:
 
     def __init__(self, fits_file, distance=None, sigma=None, cx=None, cy=None):        
-                                
+
+        self.inc = 21.0
         self._fits_info(fits_file)
         self._compute_geometric_parameters()
         self._trace_surface()
-        #self._plot_surfaces()
         self._extract_surface_info()
+        self._plot_surfaces()
 
         return
     
@@ -68,6 +69,12 @@ class EXTRACT:
         # intensity unit
         self.iunit = hdu[0].header['BUNIT'] 
         self.restfreq = hdu[0].header['RESTFRQ']
+        if self.aunit == 'rad':
+            self.bpa = np.rad2deg(self.bpa)
+        elif self.aunit == 'deg':
+            self.bpa = self.bpa
+        else:
+            raise ValueError("unknown angle units:", self.aunit)
 
         if hdu[0].header['CTYPE3'] == 'VRAD':
             self.velocity = hdu[0].header['CRVAL3'] + (np.arange(hdu[0].header['NAXIS3']) * hdu[0].header['CDELT3'])
@@ -163,7 +170,7 @@ class EXTRACT:
         self.Rout = Rout
 
         # plotting figures
-        '''
+        
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf')
 
         # line profile for systemic velocity
@@ -232,7 +239,7 @@ class EXTRACT:
         plt.close(fig)
         
         pdf.close()
-        '''
+        
         
     def _trace_surface(self):
 
@@ -244,7 +251,6 @@ class EXTRACT:
         beam = self.bmaj/self.pixelscale
 
         surfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,3], None)
-        intensity = np.full([self.nv,(self.Rout+1).astype(np.int),4], None)
 
         phi = np.deg2rad(np.arange(0,360,1))
         phi[phi > np.pi] -= 2*np.pi
@@ -279,8 +285,6 @@ class EXTRACT:
                     
                     surfaces[i,k,0,:] = np.concatenate((far_up,[phi0]))
                     surfaces[i,k,1,:] = np.concatenate((near_up,[phi1]))
-                    intensity[i,k,0] = chan_rot[far_up[0].astype(int),far_up[1].astype(int)]
-                    intensity[i,k,1] = chan_rot[near_up[0].astype(int),near_up[1].astype(int)]
                     
                 if len(sorted_peaks) >= 4:
                     if np.all(phi[sorted_peaks[2:4]] > np.pi/2):
@@ -293,11 +297,10 @@ class EXTRACT:
                     near_lo = _pol2cart(k, phi3, cx=self.com[1], cy=self.com[0])
                     
                     surfaces[i,k,2,:] = np.concatenate((far_lo,[phi2]))
-                    surfaces[i,k,3,:] = np.concatenate((near_lo,[phi3]))                    
-                    intensity[i,k,2] = chan_rot[far_lo[0].astype(int),far_lo[1].astype(int)]
-                    intensity[i,k,3] = chan_rot[near_lo[0].astype(int),near_lo[1].astype(int)]
+                    surfaces[i,k,3,:] = np.concatenate((near_lo,[phi3]))
 
                 # removing discontinuous points
+                '''
                 for vx in range(4):
                     
                     if surfaces[i,k,vx,:].all():
@@ -306,8 +309,6 @@ class EXTRACT:
                         
                         if grad0[vx,:].all():
                             gdiff = abs(grad - grad0) / (surfaces[i,k,vx,1] - coord0[vx,1])
-                            
-                            
                             
                             meany = np.mean([grady, grad0[vx,0]])
                             meanx = np.mean([gradx, grad0[vx,1]])
@@ -334,9 +335,9 @@ class EXTRACT:
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
+                '''
                 
         self.surfaces = surfaces
-        self.intensity = intensity
         self.tchans = tchans
 
 
@@ -345,14 +346,6 @@ class EXTRACT:
         print('PLOTTING TRACED LAYERS')
             
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
-        bmin = self.bmin/self.pixelscale
-        bmaj = self.bmaj/self.pixelscale
-        if self.aunit == 'deg':
-            bpa = self.bpa
-        elif self.aunit == 'rad':
-            bpa = np.rad2deg(self.bpa)
-        else:
-            raise ValueError("unknown angle units:", self.aunit)
 
         for i in tqdm(self.tchans, total=len(self.tchans)):      
             fig, ax = plt.subplots(figsize=(6,6))
@@ -368,11 +361,14 @@ class EXTRACT:
             ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='darkorange', label='upper near side')
             ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='violet', label='lower far side')
             ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='gold', label='lower near side')
+            ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='white', label='mid upper surface')
+            ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='grey', label='mid lower side')
             ax.legend(loc='upper right', fontsize=7)
             bounds = self.Rout*1.1
             ax.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
             
-            beam = Ellipse(xy=(self.com[1]-self.Rout,self.com[0]-self.Rout), width=bmin, height=bmaj, angle=-bpa, fill=True, color='white')
+            beam = Ellipse(xy=(self.com[1]-self.Rout,self.com[0]-self.Rout), width=self.bmin/self.pixelscale,
+                           height=self.bmaj/self.pixelscale, angle=-self.bpa, fill=True, color='white')
             ax.add_patch(beam)
             
             divider = make_axes_locatable(ax)
@@ -397,91 +393,70 @@ class EXTRACT:
         top = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
         bot = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
         
-        grad = np.full([self.nv,2], np.nan)
-                    
-        self.inc = 59.3
-        
         r_up, h_up, v_up, I_up = [], [], [], [] 
         r_lo, h_lo, v_lo, I_lo = [], [], [], []
 
-        if self.PA < self.nearside:
-            vdir = -1
-        else:
-            vdir = 1
+        vdir = -1 if self.PA < self.nearside else 1
+        vchans = []
 
-        for i in range(len(self.tchans)):
+        for i in self.tchans:
             for vx in range(2):
-                phi0 = self.surfaces[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,2]
-                phi0 = phi0[np.where(phi0 != None)]
-                if len(phi0) == 0:
-                    continue
-                elif len(phi0[np.where(abs(phi0-np.pi/2) < np.deg2rad(10))]) > 0.5*len(phi0):
-                    continue
-                else:
-                    x0 = self.surfaces[self.tchans[i],:,(vx+2)*vx,1]
-                    x0 = x0[np.where(x0 != None)]
-                    x1 = self.surfaces[self.tchans[i],:,(vx*2)+1,1]
-                    x1 = x1[np.where(x1 != None)]
-                    y0 = self.surfaces[self.tchans[i],:,(vx+2)*vx,0]
-                    y0 = y0[np.where(y0 != None)]
-                    y1 = self.surfaces[self.tchans[i],:,(vx*2)+1,0]
-                    y1 = y1[np.where(y1 != None)]
-                    b0 = np.max([np.min(x0),np.min(x1)])
-                    b1 = np.min([np.max(x0),np.max(x1)])
-                    x = np.arange(b0,b1,1)
-                    if len(x) == 0:
+                if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
+                    phi0 = self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2][np.where(self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2] != None)]
+                    if len(phi0[np.where(abs(phi0-np.pi/2) < np.deg2rad(20))]) > 0.5*len(phi0):
                         continue
                     else:
-                        yf0 = np.interp(x.astype(float), x0.astype(float), y0.astype(float))
-                        yf1 = np.interp(x.astype(float), x1.astype(float), y1.astype(float))
-                        yfm = np.mean([yf0,yf1], axis=0)
-                    
-                        mid[self.tchans[i],:len(x),vx,1] = x
-                        mid[self.tchans[i],:len(x),vx,0] = yfm
-                        top[self.tchans[i],:len(x),vx,1] = x
-                        top[self.tchans[i],:len(x),vx,0] = yf0
-                        bot[self.tchans[i],:len(x),vx,1] = x
-                        bot[self.tchans[i],:len(x),vx,0] = yf1 
-                            
-                        linear = stats.linregress(x,yfm)
-                        grad[self.tchans[i],vx] = linear.slope
+                        x0 = self.surfaces[i,:,(vx+2)*vx,1][np.where(self.surfaces[i,:,(vx+2)*vx,1] != None)]
+                        x1 = self.surfaces[i,:,(vx*2)+1,1][np.where(self.surfaces[i,:,(vx*2)+1,1] != None)]
+                        y0 = self.surfaces[i,:,(vx+2)*vx,0][np.where(self.surfaces[i,:,(vx+2)*vx,0] != None)]
+                        y1 = self.surfaces[i,:,(vx*2)+1,0][np.where(self.surfaces[i,:,(vx*2)+1,0] != None)]
+                        b0 = np.max([np.min(x0),np.min(x1)])
+                        b1 = np.min([np.max(x0),np.max(x1)])
+                        x = np.sort(np.arange(b0,b1,1))[::-1]
+                        if len(x) == 0:
+                            continue
+                        else:
+                            vchans.append(i)
+                            idx1 = np.argsort(x0)
+                            idx2 = np.argsort(x1)
+                            yf0 = np.interp(x.astype(float), x0[idx1].astype(float), y0[idx1].astype(float))
+                            yf1 = np.interp(x.astype(float), x1[idx2].astype(float), y1[idx2].astype(float))
+                            yfm = np.mean([yf0,yf1], axis=0)
 
-        inc = np.arcsin(1/(np.nanmean(abs(grad))))
-        print('inclination (deg) =', np.rad2deg(inc))
+                            #if i == self.tchans[19]:
+                            #    print(x0)
+                            #    print(y0)
+                            #    print(x.astype(float))
+                            #    print(yf0.astype(float))
+                            #    sys.exit()
 
-        for i in range(len(self.tchans)):
-            for vx in range(2):
-                phi0 = self.surfaces[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,2]
-                phi0 = phi0[np.where(phi0 != None)]
-                if len(phi0) == 0:
-                    continue
-                elif len(phi0[np.where(abs(phi0-np.pi/2) < np.deg2rad(10))]) > 0.5*len(phi0):
-                    continue
+                            mid[i,:len(x),vx,0], mid[i,:len(x),vx,1] = yfm, x
+                            top[i,:len(x),vx,0], top[i,:len(x),vx,1] = yf0, x
+                            bot[i,:len(x),vx,0], bot[i,:len(x),vx,1] = yf1, x
                 else:
-                    mid0x = mid[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,1]
-                    mid0x = mid0x[np.where(mid0x != None)]
-                    mid0y = mid[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,0]
-                    mid0y = mid0y[np.where(mid0y != None)]
-                
-                    top0x = top[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,1]
-                    top0x = top0x[np.where(top0x != None)]
-                    top0y = top[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,0]
-                    top0y = top0y[np.where(top0y != None)]
+                    continue
 
-                    bot0x = bot[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,1]
-                    bot0x = bot0x[np.where(bot0x != None)]
-                    bot0y = bot[self.tchans[i],:,(vx+2)*vx:(vx*2)+2,0]
-                    bot0y = bot0y[np.where(bot0y != None)]
-                
+        self.mid = mid
+        
+        for i in vchans:
+            for vx in range(2):
+                if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
+                    mid0x = mid[i,:,vx,1][np.where(mid[i,:,vx,1] != None)]
+                    mid0y = mid[i,:,vx,0][np.where(mid[i,:,vx,0] != None)]
+                    top0x = top[i,:,vx,1][np.where(top[i,:,vx,1] != None)]
+                    top0y = top[i,:,vx,0][np.where(top[i,:,vx,0] != None)]
+                    bot0x = bot[i,:,vx,1][np.where(bot[i,:,vx,1] != None)]
+                    bot0y = bot[i,:,vx,0][np.where(bot[i,:,vx,0] != None)]
                     if len(mid0x) == 0:
                         continue
                     else:
                         h = abs(mid0y - self.com[0]) / np.sin(np.deg2rad(self.inc))
-                        r = ((top0x - self.com[1])**2 + ((top0y - mid0y) / np.cos(np.deg2rad(self.inc)))**2)**(0.5)
-                        #v = (self.velocity[self.tchans[i]] - self.vsyst) * r / ((mid0x.astype(object) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
-                        #v *= vdir
-                        v = []
-                        I = np.mean([self.cube[self.tchans[i],top0y.astype(int),top0x.astype(int)],self.cube[self.tchans[i],bot0y.astype(int),bot0x.astype(int)]], axis=0)
+                        r = np.hypot(top0x.astype(float) - self.com[1], (top0y.astype(float) - mid0y.astype(float)) / np.cos(np.deg2rad(self.inc)))
+                        v = (self.velocity[i] - self.vsyst) * r / ((top0x.astype(float) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
+                        v *= vdir
+                        chan = self.cube[i,:,:]
+                        chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
+                        I = np.mean([chan_rot[top0y.astype(int),top0x.astype(int)], chan_rot[bot0y.astype(int),bot0x.astype(int)]], axis=0)
 
                         if vx == 0:
                             r_up = np.concatenate((r_up,r))
@@ -493,13 +468,14 @@ class EXTRACT:
                             h_lo = np.concatenate((h_lo,h))
                             v_lo = np.concatenate((v_lo,v))
                             I_lo = np.concatenate((I_lo,I))
-                    
-       
-        surf_up = [h_up, I_up]
-        surf_lo = [h_lo, I_lo]
-        ylabels = ['h [arcsec]', f'Int [{self.iunit}]']
+                else:
+                    continue         
         
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles_3.pdf')
+        surf_up = [h_up, v_up, I_up]
+        surf_lo = [h_lo, v_lo, I_lo]
+        ylabels = ['h [arcsec]', 'v [m/s]', f'Int [{self.iunit}]']
+        
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles.pdf')
         for k in range(len(surf_up)):
         
             fig, ax = plt.subplots(figsize=(6,6))
