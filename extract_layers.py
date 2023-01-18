@@ -10,7 +10,6 @@ import itertools
 import math
 
 from astropy.io import fits
-from time import sleep
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from scipy import stats
@@ -24,6 +23,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
 from matplotlib.patches import Ellipse
 from skimage.transform import warp_polar
+from scipy.stats import binned_statistic
 
 import matplotlib.cm as cm
 import cmasher as cmr
@@ -34,14 +34,16 @@ np.set_printoptions(threshold=np.inf)
 
 class EXTRACT:
 
-    def __init__(self, fits_file, distance=None, sigma=None, cx=None, cy=None):        
+    def __init__(self, fits_file, distance=None, sigma=None, cx=None, cy=None, inc=None):        
 
-        self.inc = 21.0
+        self.inc = inc
+        self.distance = distance
+        
         self._fits_info(fits_file)
         self._compute_geometric_parameters()
         self._trace_surface()
-        self._extract_surface_info()
-        self._plot_surfaces()
+        self._extract_surface()
+        self._plots()
 
         return
     
@@ -64,22 +66,19 @@ class EXTRACT:
         self.bmaj = hdu[0].header['BMAJ'] * 3600 
         self.bmin = hdu[0].header['BMIN'] * 3600
         self.bpa = hdu[0].header['BPA']
-        # angle unit
         self.aunit = hdu[0].header['CUNIT1']
-        # intensity unit
         self.iunit = hdu[0].header['BUNIT'] 
         self.restfreq = hdu[0].header['RESTFRQ']
         if self.aunit == 'rad':
             self.bpa = np.rad2deg(self.bpa)
-        elif self.aunit == 'deg':
-            self.bpa = self.bpa
-        else:
+        elif self.aunit != 'deg':
             raise ValueError("unknown angle units:", self.aunit)
+        self.imgcx = hdu[0].header['CRPIX1']
+        self.imgcy = hdu[0].header['CRPIX2']
 
         if hdu[0].header['CTYPE3'] == 'VRAD':
             self.velocity = hdu[0].header['CRVAL3'] + (np.arange(hdu[0].header['NAXIS3']) * hdu[0].header['CDELT3'])
             if hdu[0].header['CUNIT3'] == 'km/s':
-                # convert to m/s
                 self.velocity *= 1000
                 self.dv *= 1000
         else:
@@ -109,7 +108,7 @@ class EXTRACT:
         print('extracting systemic velocity')
 
         line_profile = np.nansum(cube, axis=(1,2))
-        vsyst, vsyst_idx = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
+        vsyst, vsyst_idx, fwhm_chans = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
         
         print('systemic velocity (m/s) =', vsyst)
         
@@ -118,7 +117,6 @@ class EXTRACT:
         self.line_profile = line_profile
         
         # velocity map
-        print('computing velocity map')
         '''
         ## peak velocity
         peak_array = np.zeros([self.nx,self.ny], dtype='int')
@@ -129,14 +127,17 @@ class EXTRACT:
                 peak_array[i,k] = max_peak
                 
         vpeak = self.velocity[peak_array]
-        vpeak[vmap == self.velocity[0]] = None
+        vpeak[vpeak == self.velocity[0]] = None
         vpeak -= vsyst
 
+        plt.imshow(vpeak, origin='lower', cmap=cm.RdBu_r)
+        plt.show()
+        sys.exit()
         self.vpeak = vpeak
         '''
         ## moment 1
         threshold_cube = cube.copy()
-        threshold_cube[cube < 3*rms] = None
+        threshold_cube[cube < 2*rms] = None
 
         M0 = np.trapz(threshold_cube, dx=self.dv, axis=0)
         
@@ -151,7 +152,7 @@ class EXTRACT:
         print('extracting center of mass')
         
         vmap = self.M1.copy()
-        beam_pix = beam=self.bmaj/self.pixelscale
+        beam_pix = self.bmaj/self.pixelscale
         com = _center_of_mass(vmap, beam=beam_pix)
         print('center coordinates (pixels) =', com)
 
@@ -161,84 +162,13 @@ class EXTRACT:
         print('extracting position angle')
 
         vmap = self.M1.copy()
-        PA, nearside, Rout = _position_angle(vmap, cx=self.com[1], cy=self.com[0], beam=beam_pix)
+        PA, nearside, Rout = _position_angle(vmap, cube, chans=fwhm_chans, cx=self.com[1], cy=self.com[0], beam=beam_pix)
         print('position angle (degrees) =', PA)
         print('nearside (degrees) =', nearside)
 
         self.PA = PA
         self.nearside = nearside
         self.Rout = Rout
-
-        # plotting figures
-        
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf')
-
-        # line profile for systemic velocity
-        fig, ax = plt.subplots(figsize=(6,6))
-        ax.plot(line_profile, color='black', linewidth=1.0)
-        ax.plot(vsyst_idx, line_profile[vsyst_idx], '.', markersize=10, color='red', label=f'v_syst = {self.vsyst} m/s')
-        ax.legend(loc='upper right', fontsize=7)
-        ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.iunit}]', title='systemic velocity')
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
-
-        # velocity map for centre of mass
-        fig, ax = plt.subplots(figsize=(6,6))
-        fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1/1000,[2]), vmax=np.nanpercentile(self.M1/1000,[98]))
-        ax.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black')
-        ax.set(xlabel='pixels', ylabel='pixels', title='dynamical centre')
-        divider = make_axes_locatable(ax)
-        colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
-        cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax, extend='both')
-        cbar.ax.tick_params(labelsize=8)
-        cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
-        tick_locator = ticker.MaxNLocator(nbins=5)
-        cbar.locator = tick_locator
-        cbar.update_ticks()
-        cbar.set_label('$\Delta$v [kms$^{-1}$]', labelpad=9, fontsize=12, weight='bold')
-        axins = zoomed_inset_axes(ax, self.nx/(3*4*beam_pix), loc='upper right')
-        axins.imshow(self.M1, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(M1,[2]), vmax=np.nanpercentile(M1,[98]))
-        axins.set(xlim = (com[1]-2*beam_pix,com[1]+2*beam_pix), ylim = (com[0]-2*beam_pix,com[0]+2*beam_pix))
-        axins.yaxis.get_major_locator().set_params(nbins=4)
-        axins.xaxis.get_major_locator().set_params(nbins=4)
-        plt.xticks(visible=False)
-        plt.yticks(visible=False)
-        mark_inset(ax, axins, loc1=2, loc2=4, fc='none', ec='black', linewidth=0.5, linestyle=':')
-        axins.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black')
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
-
-        # velocity map for position angle
-        fig, ax = plt.subplots(figsize=(6,6))
-        fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1/1000,[2]), vmax=np.nanpercentile(self.M1/1000,[98]))
-        ax.set(xlabel='pixels', ylabel='pixels', title='position angle')
-        divider = make_axes_locatable(ax)
-        colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
-        cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax, extend='both')
-        cbar.ax.tick_params(labelsize=8)
-        cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
-        tick_locator = ticker.MaxNLocator(nbins=5)
-        cbar.locator = tick_locator
-        cbar.update_ticks()
-        cbar.set_label('$\Delta$v [kms$^{-1}$]', labelpad=9, fontsize=12, weight='bold')
-        major_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA+90))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA+90))),
-                      self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA+90)))]
-        minor_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA))),
-                      self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA)))]
-        ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'PA = {self.PA}$^\circ$')
-        if self.PA < 180:
-            near = self.PA + 90
-        else:
-            near = self.PA - 90
-        ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'minor axis = {near}$^\circ$')
-        near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
-        rot = self.nearside-180 if self.nearside > 90 else self.nearside
-        ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
-        ax.legend(loc='best', fontsize=7)
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
-        
-        pdf.close()
         
         
     def _trace_surface(self):
@@ -300,34 +230,27 @@ class EXTRACT:
                     surfaces[i,k,3,:] = np.concatenate((near_lo,[phi3]))
 
                 # removing discontinuous points
-                '''
+                
                 for vx in range(4):
                     
                     if surfaces[i,k,vx,:].all():
-                        grad = (surfaces[i,k,vx,0] - coord0[vx,0]) / (surfaces[i,k,vx,1] - coord0[vx,1])
-                        grad *= surfaces[i,k,vx,0]
+                        
+                        if (surfaces[i,k,vx,1] - coord0[vx,1]) == 0. or (surfaces[i,k,vx,0] - coord0[vx,0]) == 0.:
+                            surfaces[i,k,vx,:] = None
+                            continue
+                        
+                        grady = abs((surfaces[i,k,vx,0] - coord0[vx,0]) / (surfaces[i,k,vx,1] - coord0[vx,1]))
+                        gradx = abs((surfaces[i,k,vx,1] - coord0[vx,1]) / (surfaces[i,k,vx,0] - coord0[vx,0]))
                         
                         if grad0[vx,:].all():
-                            gdiff = abs(grad - grad0) / (surfaces[i,k,vx,1] - coord0[vx,1])
-                            
-                            meany = np.mean([grady, grad0[vx,0]])
-                            meanx = np.mean([gradx, grad0[vx,1]])
-                            cam = (meanx + meany) / 2.
-                            d1 = meany - cam
-                            d2 = meanx - cam
-                            voly = np.std([grady, grad0[vx,0]]) 
-                            volx = np.std([gradx, grad0[vx,1]]) 
-                            volatility = np.sqrt((np.square(voly) + np.square(volx) + np.square(d1) + np.square(d2)) / 2.) 
 
-                            if i == tchans[19]:
-                                print(grady, gradx, volatility)
+                            volatility = np.std([abs(grady-grad0[vx,0]),abs(gradx-grad0[vx,1])]) * 100 / np.mean([abs(grady-grad0[vx,0]),abs(gradx-grad0[vx,1])])
                             
                             if volatility > 90:
                                 surfaces[i,k,vx,:] = None
-                                intensity[i,k,vx] = None
                             else:
                                grad0[vx,:] = [grady,gradx]
-                               coord0[vx,:] = surfaces[i,k,vx,:]  
+                               coord0[vx,:] = surfaces[i,k,vx,:2]  
                         else:
                             grad0[vx,:] = [grady,gradx]
 
@@ -335,15 +258,165 @@ class EXTRACT:
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-                '''
+                
                 
         self.surfaces = surfaces
         self.tchans = tchans
 
 
-    def _plot_surfaces(self):
+    def _extract_surface(self):
 
-        print('PLOTTING TRACED LAYERS')
+        mid = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
+        top = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
+        bot = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
+        
+        vdir = -1 if self.PA < self.nearside else 1
+        vchans = []
+
+        for i in self.tchans:
+            for vx in range(2):
+                if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
+                    phi0 = self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2][np.where(self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2] != None)]
+                    if len(phi0[np.where(abs(abs(phi0)-np.pi/2) < np.deg2rad(10))]) > 0.5*len(phi0):
+                        continue
+                    else:
+                        x0 = self.surfaces[i,:,(vx+2)*vx,1][np.where(self.surfaces[i,:,(vx+2)*vx,1] != None)]
+                        x1 = self.surfaces[i,:,(vx*2)+1,1][np.where(self.surfaces[i,:,(vx*2)+1,1] != None)]
+                        y0 = self.surfaces[i,:,(vx+2)*vx,0][np.where(self.surfaces[i,:,(vx+2)*vx,0] != None)]
+                        y1 = self.surfaces[i,:,(vx*2)+1,0][np.where(self.surfaces[i,:,(vx*2)+1,0] != None)]
+                        b0 = np.max([np.min(x0),np.min(x1)])
+                        b1 = np.min([np.max(x0),np.max(x1)])
+                        x = np.sort(np.arange(b0,b1,1))[::-1]
+                        if len(x) == 0:
+                            continue
+                        else:
+                            vchans.append(i)
+                            idx1 = np.argsort(x0)
+                            idx2 = np.argsort(x1)
+                            yf0 = np.interp(x.astype(float), x0[idx1].astype(float), y0[idx1].astype(float))
+                            yf1 = np.interp(x.astype(float), x1[idx2].astype(float), y1[idx2].astype(float))
+                            yfm = np.mean([yf0,yf1], axis=0)
+
+                            mid[i,:len(x),vx,0], mid[i,:len(x),vx,1] = yfm, x
+                            top[i,:len(x),vx,0], top[i,:len(x),vx,1] = yf0, x
+                            bot[i,:len(x),vx,0], bot[i,:len(x),vx,1] = yf1, x
+                else:
+                    continue
+
+        self.mid = mid
+
+        sR = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
+        sH = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
+        sV = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
+        sI = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
+        
+        for i in vchans:
+            for vx in range(2):
+                if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
+                    mid0x = mid[i,:,vx,1][np.where(mid[i,:,vx,1] != None)]
+                    mid0y = mid[i,:,vx,0][np.where(mid[i,:,vx,0] != None)]
+                    top0x = top[i,:,vx,1][np.where(top[i,:,vx,1] != None)]
+                    top0y = top[i,:,vx,0][np.where(top[i,:,vx,0] != None)]
+                    bot0x = bot[i,:,vx,1][np.where(bot[i,:,vx,1] != None)]
+                    bot0y = bot[i,:,vx,0][np.where(bot[i,:,vx,0] != None)]
+                    if len(mid0x) == 0:
+                        continue
+                    else:
+                        h = abs(mid0y - self.com[0]) / np.sin(np.deg2rad(self.inc))
+                        h[np.where(h < 0)] = None
+                        r = np.hypot(top0x.astype(float) - self.com[1], (top0y.astype(float) - mid0y.astype(float)) / np.cos(np.deg2rad(self.inc)))
+                        v = (self.velocity[i] - self.vsyst) * r / ((top0x.astype(float) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
+                        v *= vdir
+                        v[np.where(v < 0)] = None
+                        chan = self.cube[i,:,:]
+                        chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
+                        I = np.mean([chan_rot[top0y.astype(int),top0x.astype(int)], chan_rot[bot0y.astype(int),bot0x.astype(int)]], axis=0)
+
+                        sR[i,:len(r),vx] = r
+                        sH[i,:len(r),vx] = h
+                        sV[i,:len(r),vx] = v
+                        sI[i,:len(r),vx] = I
+                else:
+                    continue         
+
+        self.mid = mid
+        self.sR = sR
+        self.sH = sH
+        self.sV = sV
+        self.sI = sI
+
+
+    def _plots(self):
+        
+        print('PLOTTING FIGURES FOR GEOMETRIC PROPERTIES')
+        
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf') 
+
+        for i in tqdm(range(3), total=3):
+            fig, ax = plt.subplots(figsize=(6,6))
+
+            if i == 0:
+                # line profile for systemic velocity
+                ax.plot(self.line_profile, color='black', linewidth=1.0)
+                ax.plot(self.vsyst_idx, self.line_profile[self.vsyst_idx], '.', markersize=10, color='red', label=f'systemic velocity = {self.vsyst:.3f} m/s')
+                ax.legend(loc='upper right', fontsize=7)
+                ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.iunit}]')
+            elif i == 1:
+                # velocity map for centre of mass
+                fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1/1000,[2]), vmax=np.nanpercentile(self.M1/1000,[98]))
+                ax.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black',
+                        label=f'C.O.M.: [{self.com[0]},{self.com[1]}] pixels, \n [{(self.com[0]-self.imgcy)*self.pixelscale:.3f},{(self.com[1]-self.imgcx)*self.pixelscale:.3f}] $\Delta$arcs')
+                ax.set(xlabel='pixels', ylabel='pixels', title='dynamical centre')
+                ax.legend(loc='upper left', fontsize=8)
+                divider = make_axes_locatable(ax)
+                colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
+                cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax, extend='both')
+                cbar.ax.tick_params(labelsize=8)
+                cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
+                tick_locator = ticker.MaxNLocator(nbins=5)
+                cbar.locator = tick_locator
+                cbar.update_ticks()
+                cbar.set_label('$\Delta$v [kms$^{-1}$]', labelpad=9, fontsize=12, weight='bold')
+                axins = zoomed_inset_axes(ax, self.nx/(3*4*self.bmaj/self.pixelscale), loc='upper right')
+                axins.imshow(self.M1, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1,[2]), vmax=np.nanpercentile(self.M1,[98]))
+                axins.set(xlim = (self.com[1]-2*self.bmaj/self.pixelscale,self.com[1]+2*self.bmaj/self.pixelscale),
+                          ylim = (self.com[0]-2*self.bmaj/self.pixelscale,self.com[0]+2*self.bmaj/self.pixelscale))
+                axins.yaxis.get_major_locator().set_params(nbins=4)
+                axins.xaxis.get_major_locator().set_params(nbins=4)
+                plt.xticks(visible=False)
+                plt.yticks(visible=False)
+                mark_inset(ax, axins, loc1=2, loc2=4, fc='none', ec='black', linewidth=0.5, linestyle=':')
+                axins.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black')
+            elif i == 2:
+                # velocity map for position angle
+                fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1/1000,[2]), vmax=np.nanpercentile(self.M1/1000,[98]))
+                ax.set(xlabel='pixels', ylabel='pixels', title='position angle')
+                divider = make_axes_locatable(ax)
+                colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
+                cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax, extend='both')
+                cbar.ax.tick_params(labelsize=8)
+                cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
+                tick_locator = ticker.MaxNLocator(nbins=5)
+                cbar.locator = tick_locator
+                cbar.update_ticks()
+                cbar.set_label('$\Delta$v [kms$^{-1}$]', labelpad=9, fontsize=12, weight='bold')
+                major_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA+90))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA+90))),
+                              self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA+90)))]
+                minor_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA))),
+                              self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA)))]
+                ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'P.A. = {self.PA:.3f}$^\circ$')
+                ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'minor axis = {self.nearside:.3f}$^\circ$')
+                near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
+                rot = self.nearside-180 if self.nearside > 90 else self.nearside
+                ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
+                ax.legend(loc='best', fontsize=7)
+            
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+        pdf.close()
+        
+        
+        print('PLOTTING SURFACE TRACES')
             
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
 
@@ -385,112 +458,44 @@ class EXTRACT:
             plt.close(fig)
         
         pdf.close()
-
-
-    def _extract_surface_info(self):
-
-        mid = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
-        top = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
-        bot = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
         
-        r_up, h_up, v_up, I_up = [], [], [], [] 
-        r_lo, h_lo, v_lo, I_lo = [], [], [], []
 
-        vdir = -1 if self.PA < self.nearside else 1
-        vchans = []
+        print('PLOTTING SURFACES')
 
-        for i in self.tchans:
-            for vx in range(2):
-                if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
-                    phi0 = self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2][np.where(self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2] != None)]
-                    if len(phi0[np.where(abs(phi0-np.pi/2) < np.deg2rad(20))]) > 0.5*len(phi0):
-                        continue
-                    else:
-                        x0 = self.surfaces[i,:,(vx+2)*vx,1][np.where(self.surfaces[i,:,(vx+2)*vx,1] != None)]
-                        x1 = self.surfaces[i,:,(vx*2)+1,1][np.where(self.surfaces[i,:,(vx*2)+1,1] != None)]
-                        y0 = self.surfaces[i,:,(vx+2)*vx,0][np.where(self.surfaces[i,:,(vx+2)*vx,0] != None)]
-                        y1 = self.surfaces[i,:,(vx*2)+1,0][np.where(self.surfaces[i,:,(vx*2)+1,0] != None)]
-                        b0 = np.max([np.min(x0),np.min(x1)])
-                        b1 = np.min([np.max(x0),np.max(x1)])
-                        x = np.sort(np.arange(b0,b1,1))[::-1]
-                        if len(x) == 0:
-                            continue
-                        else:
-                            vchans.append(i)
-                            idx1 = np.argsort(x0)
-                            idx2 = np.argsort(x1)
-                            yf0 = np.interp(x.astype(float), x0[idx1].astype(float), y0[idx1].astype(float))
-                            yf1 = np.interp(x.astype(float), x1[idx2].astype(float), y1[idx2].astype(float))
-                            yfm = np.mean([yf0,yf1], axis=0)
-
-                            #if i == self.tchans[19]:
-                            #    print(x0)
-                            #    print(y0)
-                            #    print(x.astype(float))
-                            #    print(yf0.astype(float))
-                            #    sys.exit()
-
-                            mid[i,:len(x),vx,0], mid[i,:len(x),vx,1] = yfm, x
-                            top[i,:len(x),vx,0], top[i,:len(x),vx,1] = yf0, x
-                            bot[i,:len(x),vx,0], bot[i,:len(x),vx,1] = yf1, x
-                else:
-                    continue
-
-        self.mid = mid
+        self.sH[np.where(self.sH != None)] *= self.pixelscale
+        self.sR[np.where(self.sR != None)] *= self.pixelscale
+        #self.sV[self.sV == np.inf] = 0.
         
-        for i in vchans:
-            for vx in range(2):
-                if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
-                    mid0x = mid[i,:,vx,1][np.where(mid[i,:,vx,1] != None)]
-                    mid0y = mid[i,:,vx,0][np.where(mid[i,:,vx,0] != None)]
-                    top0x = top[i,:,vx,1][np.where(top[i,:,vx,1] != None)]
-                    top0y = top[i,:,vx,0][np.where(top[i,:,vx,0] != None)]
-                    bot0x = bot[i,:,vx,1][np.where(bot[i,:,vx,1] != None)]
-                    bot0y = bot[i,:,vx,0][np.where(bot[i,:,vx,0] != None)]
-                    if len(mid0x) == 0:
-                        continue
-                    else:
-                        h = abs(mid0y - self.com[0]) / np.sin(np.deg2rad(self.inc))
-                        r = np.hypot(top0x.astype(float) - self.com[1], (top0y.astype(float) - mid0y.astype(float)) / np.cos(np.deg2rad(self.inc)))
-                        v = (self.velocity[i] - self.vsyst) * r / ((top0x.astype(float) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
-                        v *= vdir
-                        chan = self.cube[i,:,:]
-                        chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
-                        I = np.mean([chan_rot[top0y.astype(int),top0x.astype(int)], chan_rot[bot0y.astype(int),bot0x.astype(int)]], axis=0)
-
-                        if vx == 0:
-                            r_up = np.concatenate((r_up,r))
-                            h_up = np.concatenate((h_up,h))
-                            v_up = np.concatenate((v_up,v))
-                            I_up = np.concatenate((I_up,I))
-                        elif vx == 1:
-                            r_lo = np.concatenate((r_lo,r))
-                            h_lo = np.concatenate((h_lo,h))
-                            v_lo = np.concatenate((v_lo,v))
-                            I_lo = np.concatenate((I_lo,I))
-                else:
-                    continue         
-        
-        surf_up = [h_up, v_up, I_up]
-        surf_lo = [h_lo, v_lo, I_lo]
+        surfs = {0: self.sH, 1: self.sV, 2: self.sI}
         ylabels = ['h [arcsec]', 'v [m/s]', f'Int [{self.iunit}]']
         
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles.pdf')
-        for k in range(len(surf_up)):
-        
+        for k in range(3):
+
             fig, ax = plt.subplots(figsize=(6,6))
-            
-            ax.plot(r_up, surf_up[k], '.', markersize=1, color='black', label='upper surface')
-            ax.plot(r_lo, surf_lo[k], '.', markersize=1, color='red', label='lower surface')
-            
-            ax.set(xlabel='r [arcsec]', ylabel=ylabels[k])
+            if self.sR[:,:,0].any():
+                ax.plot(self.sR[:,:,0].flatten(), surfs[k][:,:,0].flatten(), 'o', markersize=4, color='skyblue', fillstyle='none', label='upper surface')
+                x1 = self.sR[:,:,0][self.sR[:,:,0] != None].flatten()
+                y1 = surfs[k][:,:,0][surfs[k][:,:,0] != None].flatten()
+                bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
+                ax.plot(bins[0,:], bins[1,:], '.', markersize=4, color='navy', label='avg. upper surface')
+                
+            if self.sR[:,:,1].any():
+                ax.plot(self.sR[:,:,1].flatten(), surfs[k][:,:,1].flatten(), 'o', markersize=4, color='navajowhite', fillstyle='none', label='lower surface')
+                x1 = self.sR[:,:,1][self.sR[:,:,1] != None].flatten()
+                y1 = surfs[k][:,:,1][surfs[k][:,:,1] != None].flatten()
+                bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
+                ax.plot(bins[0,:], bins[1,:], '.', markersize=4, color='darkorange', label='avg. lower surface')
+
+            ylims = (0,np.nanpercentile(surfs[k].astype(float),[99.7])) if k == 1 else None
+            ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
             ax.legend(loc='upper right', fontsize=10)
             
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
             
         pdf.close()
-                        
+        
         
 #################
 def _rotate_disc(channel, angle=None, cx=None, cy=None):
@@ -528,8 +533,10 @@ def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
 
     vsyst_idx = channels[np.argmax(gauss_fit)]
     vsyst = v0 + (dv * vsyst_idx)
+    fwhm = abs(gauss_fit - 0.5*np.nanmax(gauss_fit))
+    fwhm_chans = channels[np.argsort(fwhm)[:2]]
 
-    return vsyst, vsyst_idx
+    return vsyst, vsyst_idx, fwhm_chans
     
 
 def gauss(x, *p):
@@ -547,142 +554,112 @@ def _center_of_mass(img, beam=None):
     img_gray[img_gray != 0] = 1
     footprint = morphology.disk(beam)
     res = morphology.white_tophat(img_gray, footprint)
-    img_denoised = img
-    img_denoised[res == 1] = None
-        
-    #img = (img - np.nanmin(img))/(np.nanmax(img) - np.nanmin(img))
-    #img = img * (10 - 0.1) + 0.1
-    #img = np.exp(img)
-    
-    normalizer = np.nansum(img_denoised)
-    grids = np.ogrid[[slice(0, i) for i in img_denoised.shape]]
+    img_pruned = img
+    img_pruned[res == 1] = None
 
-    results = [np.nansum(img_denoised * grids[dir].astype(float)) / normalizer
-               for dir in range(img_denoised.ndim)]
-
-    if np.isscalar(results[0]):
-        centre_of_mass = tuple(results)
-    else:
-        centre_of_mass = [tuple(v) for v in np.array(results).T]
-
-    x_coord = centre_of_mass[1]
-    y_coord = centre_of_mass[0]
-
-    # refine center of mass coordinates
-    y,x = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
-    radius = np.hypot(y-y_coord,x-x_coord)
-    mask = radius <= (5*beam)
-
-    masked_img = img.copy()
-    masked_img[~mask] = None
-
-    dx, dy = np.gradient(masked_img, edge_order=2)
+    dx, dy = np.gradient(img_pruned, edge_order=2)
     grad_img = np.hypot(dy,dx)
 
     kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
     grad_imgc = ndimage.convolve(grad_img, kernel)
+   
     y_coord, x_coord = np.unravel_index(np.nanargmax(grad_imgc), grad_imgc.shape)
     
     return [y_coord,x_coord]
 
 
-def _position_angle(img, cx=None, cy=None, beam=None):
+def sine_func(x, *p):
 
+    a, b, c= p
+    
+    return a * np.sin(b * x + c)
+
+        
+def _position_angle(img, cube, chans=None, cx=None, cy=None, beam=None):
+    
     img_gray = np.nan_to_num(img)
     img_gray[img_gray != 0] = 1
     footprint = morphology.disk(beam)
     res = morphology.white_tophat(img_gray, footprint)
     img[res == 1] = None
-    '''
+    
     x,y = np.meshgrid(np.arange(img.shape[1]) - cx, np.arange(img.shape[0]) - cy)
     R = np.hypot(x,y)
     R[np.isnan(img)] = None
     Rout = np.nanmax(R)
 
-    phi = np.deg2rad(np.arange(0,360,1))
+    phi = np.arange(0,360,1)
     
     rad = np.arange(1, Rout.astype(np.int), 1)
     polar = warp_polar(img, center=(cx,cy), radius=Rout)
 
     semimajor = []
-    near = []
     
     for i in rad:
-        
-        annuli = polar[:,i]
-        red_max = phi[np.nanargmax(annuli)]
-        blue_max = phi[np.nanargmin(annuli)]
-        #print(np.rad2deg(red_max), np.rad2deg(blue_max))
-        if i == 50:
-            plt.plot(annuli)
-            print(np.rad2deg(red_max), np.rad2deg(blue_max))
-            plt.show()
-            sys.exit()
 
+        annuli = polar[:,i]
+        annuli = np.nan_to_num(annuli)
+
+        if len(annuli[np.where(annuli != 0.)]) < 0.90*len(annuli):
+            continue
+           
+        if len(annuli[np.where(annuli == 0.)]) != 0:
+            phi_idx = np.where(annuli == 0.)[0]
+            fillers = np.interp(phi_idx.astype(float), phi[annuli != 0.], annuli[annuli != 0.])
+            annuli[phi_idx] = fillers
+        
+        p0 = [np.nanmax(annuli), 1/len(phi), 0]
+        coeff, var_matrix = curve_fit(sine_func, phi, annuli, p0=p0)
+        
+        sine_fit = sine_func(phi, *coeff)
+
+        red_max = phi[np.nanargmax(sine_fit)]
+        blue_max = phi[np.nanargmin(sine_fit)]
+        
         if red_max > blue_max:
-            theta = np.average([red_max, blue_max + np.pi])
+            theta = np.average([red_max, blue_max + 180])
         elif red_max < blue_max:
-            theta = np.average([red_max, blue_max - np.pi])
-        theta -= np.pi/2
+            theta = np.average([red_max, blue_max - 180])
+        theta -= 90
         semimajor.append(theta)
 
-        bend = np.average([red_max, blue_max])
-        if abs(red_max - bend) < np.pi/2:
-            if bend < np.pi:
-                bend += np.pi
-            elif bend > np.pi:
-                bend -= np.pi
-        bend -= np.pi/2
-        near.append(bend)  
-    '''
+    PA = np.average(semimajor)
+
+    for i in range(2):
+
+        img = cube[chans[i]]
+        polar = warp_polar(img, center=(cx,cy), radius=Rout)
+
+        annuli = polar[:,(Rout*0.25).astype(int)]
+        
+        peaks, properties = _peak_finder(annuli, height=np.nanstd(img), distance=beam)
+        speaks = peaks[np.argsort(properties["peak_heights"])[::-1][:2]]
+        diff = np.diff([annuli[speaks[0]],annuli[speaks[1]]])
+        smin = np.min([annuli[speaks[0]],annuli[speaks[1]]])
+        if (abs(diff) * 100 /smin) < 5.:
+            if i == 0:
+                ang1 = np.average([phi[speaks[0]],phi[speaks[1]]])
+            elif i == 1:
+                ang2 = np.average([phi[speaks[0]],phi[speaks[1]]])
+        else:
+            peak = peaks[np.argmax(properties["peak_heights"])]
+            if i == 0:
+                ang1 = peak
+            elif i == 1:
+                ang2 = peak
+                
+    twist = np.average([ang1,ang2])
     
-    x,y = np.meshgrid(np.arange(img.shape[1]) - cx, np.arange(img.shape[0]) - cy)
-    R = np.hypot(x,y)
-    R[np.isnan(img)] = None
-    theta = np.arctan2(y,x) + 2*np.pi
-    theta[theta > 2*np.pi] -= 2*np.pi
-    
-    rad = np.arange(1, np.nanmax(R), 1)
-    semimajor = []
-    near = []
-
-    redside = img.copy()
-    redside[redside < 0] = None
-    blueside = img.copy()
-    blueside[blueside > 0] = None
-
-    for i in rad:
-        mask = (np.greater(R, i - 1) & np.less(R, i + 1)) | ~np.isnan(img)
-        masked_img = img[mask]
-        masked_theta = theta[mask]
-        masked_redside = redside[mask]
-        masked_blueside = blueside[mask]
-
-        if len(masked_redside) > 0 and len(masked_blueside) > 0:
-            theta_max_redside = masked_theta[np.nanargmax(masked_redside)]
-            theta_max_blueside = masked_theta[np.nanargmin(masked_blueside)]
-
-            bend = np.average([theta_max_redside, theta_max_blueside])
-            if abs(theta_max_redside - bend) < np.pi/2:
-                if bend < np.pi:
-                    bend += np.pi
-                elif bend > np.pi:
-                    bend -= np.pi
-            bend -= np.pi/2
-            near.append(bend)
-            
-            if theta_max_redside > theta_max_blueside:
-                theta_max = np.average([theta_max_redside, theta_max_blueside + np.pi])
-            elif theta_max_redside < theta_max_blueside:
-                theta_max = np.average([theta_max_redside, theta_max_blueside - np.pi])
-            theta_max -= np.pi/2
-            semimajor.append(theta_max)
-            
-    Rout = np.nanmax(R)
-   
-    PA = np.rad2deg(np.average(semimajor))
-    
-    nearside = np.rad2deg(np.average(near))
+    if abs(twist - (PA + 90)) < 90:
+        if twist < 180:
+            nearside = PA + 90
+        elif twist > 180:
+            nearside = PA - 90
+    else:
+        if PA+90 > 180:
+            nearside = PA - 90
+        elif PA+90 < 180:
+            nearside = PA + 90
     
     return PA, nearside, Rout
 
