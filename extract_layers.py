@@ -24,6 +24,7 @@ from matplotlib import ticker
 from matplotlib.patches import Ellipse
 from skimage.transform import warp_polar
 from scipy.stats import binned_statistic
+from scipy.signal import savgol_filter
 
 import matplotlib.cm as cm
 import cmasher as cmr
@@ -230,7 +231,7 @@ class EXTRACT:
                     surfaces[i,k,3,:] = np.concatenate((near_lo,[phi3]))
 
                 # removing discontinuous points
-                
+                '''
                 for vx in range(4):
                     
                     if surfaces[i,k,vx,:].all():
@@ -239,26 +240,34 @@ class EXTRACT:
                             surfaces[i,k,vx,:] = None
                             continue
                         
-                        grady = abs((surfaces[i,k,vx,0] - coord0[vx,0]) / (surfaces[i,k,vx,1] - coord0[vx,1]))
-                        gradx = abs((surfaces[i,k,vx,1] - coord0[vx,1]) / (surfaces[i,k,vx,0] - coord0[vx,0]))
+                        grady = abs(surfaces[i,k,vx,0] - coord0[vx,0]) 
+                        gradx = abs(surfaces[i,k,vx,1] - coord0[vx,1]) 
+
+                        #if i == tchans[19]:
+                        #    print(grady, gradx)
                         
                         if grad0[vx,:].all():
 
-                            volatility = np.std([abs(grady-grad0[vx,0]),abs(gradx-grad0[vx,1])]) * 100 / np.mean([abs(grady-grad0[vx,0]),abs(gradx-grad0[vx,1])])
+                            voly = grady / grad0[vx,0]
+                            volx = gradx / grad0[vx,1]
+
+                            if i == tchans[19]:
+                                #print(grady / grad0[vx,0], gradx / grad0[vx,1])
+                                print(voly,volx)
                             
-                            if volatility > 90:
+                            if volx > 10 or voly > 10:
                                 surfaces[i,k,vx,:] = None
                             else:
                                grad0[vx,:] = [grady,gradx]
                                coord0[vx,:] = surfaces[i,k,vx,:2]  
                         else:
                             grad0[vx,:] = [grady,gradx]
-
+                
                 if np.any(surfaces[i,k,:2,:] == None):
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-                
+                '''
                 
         self.surfaces = surfaces
         self.tchans = tchans
@@ -464,7 +473,6 @@ class EXTRACT:
 
         self.sH[np.where(self.sH != None)] *= self.pixelscale
         self.sR[np.where(self.sR != None)] *= self.pixelscale
-        #self.sV[self.sV == np.inf] = 0.
         
         surfs = {0: self.sH, 1: self.sV, 2: self.sI}
         ylabels = ['h [arcsec]', 'v [m/s]', f'Int [{self.iunit}]']
@@ -557,7 +565,28 @@ def _center_of_mass(img, beam=None):
     img_pruned = img
     img_pruned[res == 1] = None
 
-    dx, dy = np.gradient(img_pruned, edge_order=2)
+    normalizer = np.nansum(img_pruned)
+    grids = np.ogrid[[slice(0, i) for i in img_pruned.shape]]
+
+    results = [np.nansum(img_pruned * grids[dir].astype(float)) / normalizer
+               for dir in range(img_pruned.ndim)]
+
+    if np.isscalar(results[0]):
+        centre_of_mass = tuple(results)
+    else:
+        centre_of_mass = [tuple(v) for v in np.array(results).T]
+
+    x_coord = centre_of_mass[1]
+    y_coord = centre_of_mass[0]
+
+    y,x = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
+    radius = np.hypot(y-y_coord,x-x_coord)
+    mask = radius <= (5*beam)
+
+    masked_img = img.copy()
+    masked_img[~mask] = None
+
+    dx, dy = np.gradient(masked_img, edge_order=2)
     grad_img = np.hypot(dy,dx)
 
     kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
@@ -570,7 +599,7 @@ def _center_of_mass(img, beam=None):
 
 def sine_func(x, *p):
 
-    a, b, c= p
+    a, b, c = p
     
     return a * np.sin(b * x + c)
 
@@ -592,11 +621,12 @@ def _position_angle(img, cube, chans=None, cx=None, cy=None, beam=None):
     
     rad = np.arange(1, Rout.astype(np.int), 1)
     polar = warp_polar(img, center=(cx,cy), radius=Rout)
-
+    
     semimajor = []
+    weights = []
     
     for i in rad:
-
+        
         annuli = polar[:,i]
         annuli = np.nan_to_num(annuli)
 
@@ -609,21 +639,47 @@ def _position_angle(img, cube, chans=None, cx=None, cy=None, beam=None):
             annuli[phi_idx] = fillers
         
         p0 = [np.nanmax(annuli), 1/len(phi), 0]
-        coeff, var_matrix = curve_fit(sine_func, phi, annuli, p0=p0)
+        coeff, _ = curve_fit(sine_func, phi, annuli, p0=p0)
         
         sine_fit = sine_func(phi, *coeff)
+        residuals = annuli - sine_fit
+        ss_res = np.sum(np.square(residuals))
+        ss_tot = np.sum(np.square(annuli-np.mean(annuli)))
+        r_squared = 1 - (ss_res / ss_tot)
 
         red_max = phi[np.nanargmax(sine_fit)]
         blue_max = phi[np.nanargmin(sine_fit)]
+        weight = np.nanmean([np.nanmax(sine_fit),abs(np.nanmin(sine_fit))])
         
         if red_max > blue_max:
             theta = np.average([red_max, blue_max + 180])
         elif red_max < blue_max:
             theta = np.average([red_max, blue_max - 180])
-        theta -= 90
-        semimajor.append(theta)
+        #theta -= 90
 
-    PA = np.average(semimajor)
+        y_smooth = savgol_filter(annuli, window_length=11, polyorder=2, mode="nearest")
+
+        if i == 59:
+            plt.figure(1)
+            plt.plot(phi, annuli)
+            plt.plot(phi, sine_fit)
+            plt.plot(phi, y_smooth)
+            plt.show()
+        if i == 3:
+            plt.figure(2)
+            plt.plot(phi, annuli)
+            plt.plot(phi, sine_fit)
+            plt.plot(phi, y_smooth)
+            plt.show()
+            
+        print(i, red_max, blue_max, theta, r_squared)
+        
+        semimajor.append(theta)
+        weights.append(weight)
+
+    print(semimajor)
+    sys.exit()
+    PA = np.average(semimajor, weights=weights)
 
     for i in range(2):
 
