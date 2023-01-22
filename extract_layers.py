@@ -17,7 +17,7 @@ from tqdm import tqdm
 from scipy import ndimage
 from skimage.measure import regionprops
 from skimage import color, morphology
-from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
@@ -109,7 +109,7 @@ class EXTRACT:
         print('extracting systemic velocity')
 
         line_profile = np.nansum(cube, axis=(1,2))
-        vsyst, vsyst_idx, fwhm_chans = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
+        vsyst, vsyst_idx = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
         
         print('systemic velocity (m/s) =', vsyst)
         
@@ -154,16 +154,16 @@ class EXTRACT:
         
         vmap = self.M1.copy()
         beam_pix = self.bmaj/self.pixelscale
-        com = _center_of_mass(vmap, beam=beam_pix)
+        com, M1p = _center_of_mass(vmap, beam=beam_pix)
         print('center coordinates (pixels) =', com)
 
         self.com = com
+        self.M1p = M1p
 
         # position angle
         print('extracting position angle')
 
-        vmap = self.M1.copy()
-        PA, nearside, Rout = _position_angle(vmap, cube, chans=fwhm_chans, cx=self.com[1], cy=self.com[0], beam=beam_pix)
+        PA, nearside, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
         print('position angle (degrees) =', PA)
         print('nearside (degrees) =', nearside)
 
@@ -359,7 +359,7 @@ class EXTRACT:
         
         print('PLOTTING FIGURES FOR GEOMETRIC PROPERTIES')
         
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf') 
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_gp.pdf')
 
         for i in tqdm(range(3), total=3):
             fig, ax = plt.subplots(figsize=(6,6))
@@ -370,13 +370,19 @@ class EXTRACT:
                 ax.plot(self.vsyst_idx, self.line_profile[self.vsyst_idx], '.', markersize=10, color='red', label=f'systemic velocity = {self.vsyst:.3f} m/s')
                 ax.legend(loc='upper right', fontsize=7)
                 ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.iunit}]')
+                axins = inset_axes(ax, width="30%", height="30%",loc='upper left')
+                axins.imshow(self.cube[self.vsyst_idx,:,:], origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(self.cube[self.vsyst_idx,:,:]))
+                axins.set_yticks([])
+                axins.set_xticks([])
+                bounds = self.Rout*1.1
+                axins.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
             elif i == 1:
                 # velocity map for centre of mass
-                fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1/1000,[2]), vmax=np.nanpercentile(self.M1/1000,[98]))
+                fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1p/1000,[1]), vmax=np.nanpercentile(self.M1p/1000,[99]))
                 ax.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black',
                         label=f'C.O.M.: [{self.com[0]},{self.com[1]}] pixels, \n [{(self.com[0]-self.imgcy)*self.pixelscale:.3f},{(self.com[1]-self.imgcx)*self.pixelscale:.3f}] $\Delta$arcs')
                 ax.set(xlabel='pixels', ylabel='pixels', title='dynamical centre')
-                ax.legend(loc='upper left', fontsize=8)
+                ax.legend(loc='upper left', fontsize=8, framealpha=1.0)
                 divider = make_axes_locatable(ax)
                 colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
                 cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax, extend='both')
@@ -387,7 +393,7 @@ class EXTRACT:
                 cbar.update_ticks()
                 cbar.set_label('$\Delta$v [kms$^{-1}$]', labelpad=9, fontsize=12, weight='bold')
                 axins = zoomed_inset_axes(ax, self.nx/(3*4*self.bmaj/self.pixelscale), loc='upper right')
-                axins.imshow(self.M1, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1,[2]), vmax=np.nanpercentile(self.M1,[98]))
+                axins.imshow(self.M1, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1p,[2]), vmax=np.nanpercentile(self.M1p,[98]))
                 axins.set(xlim = (self.com[1]-2*self.bmaj/self.pixelscale,self.com[1]+2*self.bmaj/self.pixelscale),
                           ylim = (self.com[0]-2*self.bmaj/self.pixelscale,self.com[0]+2*self.bmaj/self.pixelscale))
                 axins.yaxis.get_major_locator().set_params(nbins=4)
@@ -398,7 +404,7 @@ class EXTRACT:
                 axins.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black')
             elif i == 2:
                 # velocity map for position angle
-                fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1/1000,[2]), vmax=np.nanpercentile(self.M1/1000,[98]))
+                fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1p/1000,[1]), vmax=np.nanpercentile(self.M1p/1000,[99]))
                 ax.set(xlabel='pixels', ylabel='pixels', title='position angle')
                 divider = make_axes_locatable(ax)
                 colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
@@ -418,13 +424,13 @@ class EXTRACT:
                 near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
                 rot = self.nearside-180 if self.nearside > 90 else self.nearside
                 ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
-                ax.legend(loc='best', fontsize=7)
+                ax.legend(loc='best', fontsize=7, framealpha=1.0)
             
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
         pdf.close()
         
-        
+        '''
         print('PLOTTING SURFACE TRACES')
             
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
@@ -503,7 +509,7 @@ class EXTRACT:
             plt.close(fig)
             
         pdf.close()
-        
+        '''
         
 #################
 def _rotate_disc(channel, angle=None, cx=None, cy=None):
@@ -541,10 +547,8 @@ def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
 
     vsyst_idx = channels[np.argmax(gauss_fit)]
     vsyst = v0 + (dv * vsyst_idx)
-    fwhm = abs(gauss_fit - 0.5*np.nanmax(gauss_fit))
-    fwhm_chans = channels[np.argsort(fwhm)[:2]]
 
-    return vsyst, vsyst_idx, fwhm_chans
+    return vsyst, vsyst_idx
     
 
 def gauss(x, *p):
@@ -555,21 +559,21 @@ def gauss(x, *p):
 
 
 def _center_of_mass(img, beam=None):
-    
-    img = abs(img)
 
     img_gray = np.nan_to_num(img)
     img_gray[img_gray != 0] = 1
     footprint = morphology.disk(beam)
     res = morphology.white_tophat(img_gray, footprint)
-    img_pruned = img
-    img_pruned[res == 1] = None
+    imgp = img.copy()
+    imgp[res == 1] = None
 
-    normalizer = np.nansum(img_pruned)
-    grids = np.ogrid[[slice(0, i) for i in img_pruned.shape]]
+    abs_imgp = abs(imgp)
 
-    results = [np.nansum(img_pruned * grids[dir].astype(float)) / normalizer
-               for dir in range(img_pruned.ndim)]
+    normalizer = np.nansum(abs_imgp)
+    grids = np.ogrid[[slice(0, i) for i in abs_imgp.shape]]
+
+    results = [np.nansum(abs_imgp * grids[dir].astype(float)) / normalizer
+               for dir in range(abs_imgp.ndim)]
 
     if np.isscalar(results[0]):
         centre_of_mass = tuple(results)
@@ -583,7 +587,7 @@ def _center_of_mass(img, beam=None):
     radius = np.hypot(y-y_coord,x-x_coord)
     mask = radius <= (5*beam)
 
-    masked_img = img.copy()
+    masked_img = abs_imgp.copy()
     masked_img[~mask] = None
 
     dx, dy = np.gradient(masked_img, edge_order=2)
@@ -594,7 +598,7 @@ def _center_of_mass(img, beam=None):
    
     y_coord, x_coord = np.unravel_index(np.nanargmax(grad_imgc), grad_imgc.shape)
     
-    return [y_coord,x_coord]
+    return [y_coord,x_coord], imgp
 
 
 def sine_func(x, *p):
@@ -604,31 +608,27 @@ def sine_func(x, *p):
     return a * np.sin(b * x + c)
 
         
-def _position_angle(img, cube, chans=None, cx=None, cy=None, beam=None):
-    
-    img_gray = np.nan_to_num(img)
-    img_gray[img_gray != 0] = 1
-    footprint = morphology.disk(beam)
-    res = morphology.white_tophat(img_gray, footprint)
-    img[res == 1] = None
+def _position_angle(img, cx=None, cy=None, beam=None):
     
     x,y = np.meshgrid(np.arange(img.shape[1]) - cx, np.arange(img.shape[0]) - cy)
     R = np.hypot(x,y)
     R[np.isnan(img)] = None
     Rout = np.nanmax(R)
 
-    phi = np.arange(0,360,1)
+    phi = np.deg2rad(np.arange(0,360,1))
+    phi[phi > np.pi] -= 2*np.pi
+
+    phi_deg = np.arange(0,360,1)
     
     rad = np.arange(1, Rout.astype(np.int), 1)
     polar = warp_polar(img, center=(cx,cy), radius=Rout)
     
     semimajor = []
-    weights = []
+    near = []
     
     for i in rad:
         
-        annuli = polar[:,i]
-        annuli = np.nan_to_num(annuli)
+        annuli = np.nan_to_num(polar[:,i])
 
         if len(annuli[np.where(annuli != 0.)]) < 0.90*len(annuli):
             continue
@@ -637,86 +637,52 @@ def _position_angle(img, cube, chans=None, cx=None, cy=None, beam=None):
             phi_idx = np.where(annuli == 0.)[0]
             fillers = np.interp(phi_idx.astype(float), phi[annuli != 0.], annuli[annuli != 0.])
             annuli[phi_idx] = fillers
-        
-        p0 = [np.nanmax(annuli), 1/len(phi), 0]
-        coeff, _ = curve_fit(sine_func, phi, annuli, p0=p0)
-        
-        sine_fit = sine_func(phi, *coeff)
-        residuals = annuli - sine_fit
+
+        smoothed = savgol_filter(annuli, window_length=11, polyorder=2, mode='interp')
+        residuals = annuli - smoothed
         ss_res = np.sum(np.square(residuals))
         ss_tot = np.sum(np.square(annuli-np.mean(annuli)))
-        r_squared = 1 - (ss_res / ss_tot)
-
-        red_max = phi[np.nanargmax(sine_fit)]
-        blue_max = phi[np.nanargmin(sine_fit)]
-        weight = np.nanmean([np.nanmax(sine_fit),abs(np.nanmin(sine_fit))])
+        rsquared = 1 - (ss_res / ss_tot)
+        if rsquared < 0.997:
+            continue
+        
+        red_max = phi[np.nanargmax(annuli)]
+        blue_max = phi[np.nanargmin(annuli)]
         
         if red_max > blue_max:
-            theta = np.average([red_max, blue_max + 180])
+            blue_max += np.pi
         elif red_max < blue_max:
-            theta = np.average([red_max, blue_max - 180])
-        #theta -= 90
-
-        y_smooth = savgol_filter(annuli, window_length=11, polyorder=2, mode="nearest")
-
-        if i == 59:
-            plt.figure(1)
-            plt.plot(phi, annuli)
-            plt.plot(phi, sine_fit)
-            plt.plot(phi, y_smooth)
-            plt.show()
-        if i == 3:
-            plt.figure(2)
-            plt.plot(phi, annuli)
-            plt.plot(phi, sine_fit)
-            plt.plot(phi, y_smooth)
-            plt.show()
-            
-        print(i, red_max, blue_max, theta, r_squared)
+            blue_max -= np.pi
+        x = np.average([i*np.cos(red_max),i*np.cos(blue_max)])
+        y = np.average([i*np.sin(red_max),i*np.sin(blue_max)])
+        theta = np.rad2deg(np.arctan2(y,x)) - 90
         
         semimajor.append(theta)
-        weights.append(weight)
-
-    print(semimajor)
-    sys.exit()
-    PA = np.average(semimajor, weights=weights)
-
-    for i in range(2):
-
-        img = cube[chans[i]]
-        polar = warp_polar(img, center=(cx,cy), radius=Rout)
-
-        annuli = polar[:,(Rout*0.25).astype(int)]
         
-        peaks, properties = _peak_finder(annuli, height=np.nanstd(img), distance=beam)
-        speaks = peaks[np.argsort(properties["peak_heights"])[::-1][:2]]
-        diff = np.diff([annuli[speaks[0]],annuli[speaks[1]]])
-        smin = np.min([annuli[speaks[0]],annuli[speaks[1]]])
-        if (abs(diff) * 100 /smin) < 5.:
-            if i == 0:
-                ang1 = np.average([phi[speaks[0]],phi[speaks[1]]])
-            elif i == 1:
-                ang2 = np.average([phi[speaks[0]],phi[speaks[1]]])
-        else:
-            peak = peaks[np.argmax(properties["peak_heights"])]
-            if i == 0:
-                ang1 = peak
-            elif i == 1:
-                ang2 = peak
-                
-    twist = np.average([ang1,ang2])
-    
-    if abs(twist - (PA + 90)) < 90:
-        if twist < 180:
-            nearside = PA + 90
-        elif twist > 180:
-            nearside = PA - 90
-    else:
-        if PA+90 > 180:
-            nearside = PA - 90
-        elif PA+90 < 180:
-            nearside = PA + 90
-    
+        tred_max = phi_deg[np.nanargmax(annuli)]
+        tblue_max = phi_deg[np.nanargmin(annuli)]
+        
+        bend = np.average([tred_max, tblue_max])
+        
+        if (tred_max - bend) < 90:
+            if bend < 180:
+                bend += 180
+            elif bend > 180:
+                bend -= 180
+        bend -= 90
+        
+        near.append(bend)
+
+    PA = np.average(semimajor)
+    if PA < -90:
+        PA += 360
+        
+    nearside = np.average(near)
+    if nearside < -90:
+        nearside += 360
+        
+    print(nearside)
+    sys.exit()
     return PA, nearside, Rout
 
 
