@@ -23,7 +23,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
 from matplotlib.patches import Ellipse
 from skimage.transform import warp_polar
-from scipy.stats import binned_statistic
+from scipy.stats import binned_statistic, linregress
 from scipy.signal import savgol_filter
 
 import matplotlib.cm as cm
@@ -163,12 +163,10 @@ class EXTRACT:
         # position angle
         print('extracting position angle')
 
-        PA, nearside, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
+        PA, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
         print('position angle (degrees) =', PA)
-        print('nearside (degrees) =', nearside)
 
         self.PA = PA
-        self.nearside = nearside
         self.Rout = Rout
         
         
@@ -190,12 +188,8 @@ class EXTRACT:
         for i in tchans:
 
             chan = self.cube[i,:,:]
-            chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
+            chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
             polar = warp_polar(chan_rot, center=(self.com[1],self.com[0]), radius=self.Rout)
-            
-            grad0 = np.full([4,2], None)
-            coord0 = np.full([4,2], None)
-            coord0[:,:] = [self.com[0],self.com[1]]
             
             for k in rad:
                 
@@ -205,70 +199,60 @@ class EXTRACT:
                 sorted_peaks = peaks[np.argsort(annuli[peaks])][::-1]
 
                 if len(sorted_peaks) >= 2:
-                    if np.all(phi[sorted_peaks[:2]] > np.pi/2):
+                    if np.all(phi[sorted_peaks[:2]] > np.pi/2) or np.all(phi[sorted_peaks[:2]] < -np.pi/2):
                         phi0 = np.min(phi[sorted_peaks[:2]])
                         phi1 = np.max(phi[sorted_peaks[:2]])
                     else:
                         phi0 = np.max(phi[sorted_peaks[:2]])
                         phi1 = np.min(phi[sorted_peaks[:2]])
-                    far_up = _pol2cart(k, phi0, cx=self.com[1], cy=self.com[0])
-                    near_up = _pol2cart(k, phi1, cx=self.com[1], cy=self.com[0])
+                    up1 = _pol2cart(k, phi0, cx=self.com[1], cy=self.com[0])
+                    up2 = _pol2cart(k, phi1, cx=self.com[1], cy=self.com[0])
                     
-                    surfaces[i,k,0,:] = np.concatenate((far_up,[phi0]))
-                    surfaces[i,k,1,:] = np.concatenate((near_up,[phi1]))
+                    surfaces[i,k,0,:] = np.concatenate((up1,[phi0]))
+                    surfaces[i,k,1,:] = np.concatenate((up2,[phi1]))
                     
                 if len(sorted_peaks) >= 4:
-                    if np.all(phi[sorted_peaks[2:4]] > np.pi/2):
+                    if np.all(phi[sorted_peaks[2:4]] > np.pi/2) or np.all(phi[sorted_peaks[2:4]] < -np.pi/2):
                         phi2 = np.min(phi[sorted_peaks[2:4]])
                         phi3 = np.max(phi[sorted_peaks[2:4]])
                     else:
                         phi2 = np.max(phi[sorted_peaks[2:4]])
                         phi3 = np.min(phi[sorted_peaks[2:4]])
-                    far_lo = _pol2cart(k, phi2, cx=self.com[1], cy=self.com[0])
-                    near_lo = _pol2cart(k, phi3, cx=self.com[1], cy=self.com[0])
+                    lo1 = _pol2cart(k, phi2, cx=self.com[1], cy=self.com[0])
+                    lo2 = _pol2cart(k, phi3, cx=self.com[1], cy=self.com[0])
                     
-                    surfaces[i,k,2,:] = np.concatenate((far_lo,[phi2]))
-                    surfaces[i,k,3,:] = np.concatenate((near_lo,[phi3]))
-
-                # removing discontinuous points
-                '''
-                for vx in range(4):
-                    
-                    if surfaces[i,k,vx,:].all():
-                        
-                        if (surfaces[i,k,vx,1] - coord0[vx,1]) == 0. or (surfaces[i,k,vx,0] - coord0[vx,0]) == 0.:
-                            surfaces[i,k,vx,:] = None
-                            continue
-                        
-                        grady = abs(surfaces[i,k,vx,0] - coord0[vx,0]) 
-                        gradx = abs(surfaces[i,k,vx,1] - coord0[vx,1]) 
-
-                        #if i == tchans[19]:
-                        #    print(grady, gradx)
-                        
-                        if grad0[vx,:].all():
-
-                            voly = grady / grad0[vx,0]
-                            volx = gradx / grad0[vx,1]
-
-                            if i == tchans[19]:
-                                #print(grady / grad0[vx,0], gradx / grad0[vx,1])
-                                print(voly,volx)
-                            
-                            if volx > 10 or voly > 10:
+                    surfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
+                    surfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
+            
+            coord0 = np.full([4,2], None)
+            
+            for vx in range(4):
+                if surfaces[i,:,vx,:].any():
+                    donkey = surfaces[i,:,vx,2].copy()
+                    for k in rad:
+                        if donkey[k] != None:
+                            donkey[k] = np.rad2deg(donkey[k])
+                            donkey[k] += 360 if donkey[k] < 0 else 0
+                    boulder = np.nanstd(donkey[np.where(donkey != None)])
+                    if i == tchans[30]:
+                        print(boulder)
+                        #print(donkey)
+                    donkey0 = donkey[donkey != None][0]
+                
+                    for k in rad:
+                        if donkey[k] is not None:
+                            fiona = abs(donkey[k] - donkey0)
+                            if fiona > boulder:
                                 surfaces[i,k,vx,:] = None
                             else:
-                               grad0[vx,:] = [grady,gradx]
-                               coord0[vx,:] = surfaces[i,k,vx,:2]  
-                        else:
-                            grad0[vx,:] = [grady,gradx]
-                
+                                donkey0 = donkey[k]
+
+            for k in rad:
                 if np.any(surfaces[i,k,:2,:] == None):
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-                '''
-                
+        sys.exit()
         self.surfaces = surfaces
         self.tchans = tchans
 
@@ -279,8 +263,8 @@ class EXTRACT:
         top = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
         bot = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
         
-        vdir = -1 if self.PA < self.nearside else 1
         vchans = []
+        hslope = []
 
         for i in self.tchans:
             for vx in range(2):
@@ -305,6 +289,7 @@ class EXTRACT:
                             yf0 = np.interp(x.astype(float), x0[idx1].astype(float), y0[idx1].astype(float))
                             yf1 = np.interp(x.astype(float), x1[idx2].astype(float), y1[idx2].astype(float))
                             yfm = np.mean([yf0,yf1], axis=0)
+                            hslope.append(np.nanmean(yfm))
 
                             mid[i,:len(x),vx,0], mid[i,:len(x),vx,1] = yfm, x
                             top[i,:len(x),vx,0], top[i,:len(x),vx,1] = yf0, x
@@ -312,7 +297,15 @@ class EXTRACT:
                 else:
                     continue
 
-        self.mid = mid
+        if np.nanmean(hslope - self.com[0]) < 0:
+            self.nearside = self.PA + 90
+            hdir = -1
+        else:
+            self.nearside = self.PA - 90
+            hdir = 1
+            
+        if self.nearside < -90:
+            self.nearside += 360
 
         sR = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
         sH = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
@@ -333,14 +326,22 @@ class EXTRACT:
                     else:
                         h = abs(mid0y - self.com[0]) / np.sin(np.deg2rad(self.inc))
                         h[np.where(h < 0)] = None
-                        r = np.hypot(top0x.astype(float) - self.com[1], (top0y.astype(float) - mid0y.astype(float)) / np.cos(np.deg2rad(self.inc)))
-                        v = (self.velocity[i] - self.vsyst) * r / ((top0x.astype(float) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
-                        v *= vdir
+                        if hdir == -1:
+                            r = np.hypot(bot0x.astype(float) - self.com[1], (bot0y.astype(float) - mid0y.astype(float)) / np.cos(np.deg2rad(self.inc)))
+                            v = (self.velocity[i] - self.vsyst) * r / ((bot0x.astype(float) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
+                        else:
+                            r = np.hypot(top0x.astype(float) - self.com[1], (top0y.astype(float) - mid0y.astype(float)) / np.cos(np.deg2rad(self.inc)))
+                            v = (self.velocity[i] - self.vsyst) * r / ((top0x.astype(float) - self.com[1]) * np.sin(np.deg2rad(self.inc)))
                         v[np.where(v < 0)] = None
                         chan = self.cube[i,:,:]
-                        chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
+                        chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
                         I = np.mean([chan_rot[top0y.astype(int),top0x.astype(int)], chan_rot[bot0y.astype(int),bot0x.astype(int)]], axis=0)
 
+                        r[np.where(h == None)] = None
+                        r[np.where(v == None)] = None
+                        I[np.where(h == None)] = None
+                        I[np.where(v == None)] = None
+                        
                         sR[i,:len(r),vx] = r
                         sH[i,:len(r),vx] = h
                         sV[i,:len(r),vx] = v
@@ -420,7 +421,7 @@ class EXTRACT:
                 minor_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA))),
                               self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA)))]
                 ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'P.A. = {self.PA:.3f}$^\circ$')
-                ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'minor axis = {self.nearside:.3f}$^\circ$')
+                ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'nearside = {self.nearside:.3f}$^\circ$')
                 near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
                 rot = self.nearside-180 if self.nearside > 90 else self.nearside
                 ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
@@ -430,27 +431,27 @@ class EXTRACT:
             plt.close(fig)
         pdf.close()
         
-        '''
+        
         print('PLOTTING SURFACE TRACES')
             
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_2.pdf')
 
         for i in tqdm(self.tchans, total=len(self.tchans)):      
             fig, ax = plt.subplots(figsize=(6,6))
 
             chan = self.cube[i,:,:]
-            chan_rot = _rotate_disc(chan, angle=self.nearside-180, cx=self.com[1], cy=self.com[0])
+            chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
 
             fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(self.cube))
             ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
             ax.set(xlabel='pixels', ylabel='pixels')
 
-            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='blueviolet', label='upper far side')
-            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='darkorange', label='upper near side')
-            ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='violet', label='lower far side')
-            ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='gold', label='lower near side')
-            ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='white', label='mid upper surface')
-            ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='grey', label='mid lower side')
+            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='rebeccapurple')
+            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='mediumorchid')
+            ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='darkorange')
+            ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='goldenrod')
+            ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='thistle', label='avg. upper surface')
+            ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='wheat', label='avg. lower surface')
             ax.legend(loc='upper right', fontsize=7)
             bounds = self.Rout*1.1
             ax.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
@@ -484,7 +485,7 @@ class EXTRACT:
         ylabels = ['h [arcsec]', 'v [m/s]', f'Int [{self.iunit}]']
         
         pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles.pdf')
-        for k in range(3):
+        for k in tqdm(range(3)):
 
             fig, ax = plt.subplots(figsize=(6,6))
             if self.sR[:,:,0].any():
@@ -501,7 +502,7 @@ class EXTRACT:
                 bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
                 ax.plot(bins[0,:], bins[1,:], '.', markersize=4, color='darkorange', label='avg. lower surface')
 
-            ylims = (0,np.nanpercentile(surfs[k].astype(float),[99.7])) if k == 1 else None
+            ylims = (np.nanpercentile(surfs[k].astype(float),[0.3]),np.nanpercentile(surfs[k].astype(float),[99.7])) if k == 1 else None
             ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
             ax.legend(loc='upper right', fontsize=10)
             
@@ -509,7 +510,7 @@ class EXTRACT:
             plt.close(fig)
             
         pdf.close()
-        '''
+        
         
 #################
 def _rotate_disc(channel, angle=None, cx=None, cy=None):
@@ -617,14 +618,11 @@ def _position_angle(img, cx=None, cy=None, beam=None):
 
     phi = np.deg2rad(np.arange(0,360,1))
     phi[phi > np.pi] -= 2*np.pi
-
-    phi_deg = np.arange(0,360,1)
     
     rad = np.arange(1, Rout.astype(np.int), 1)
     polar = warp_polar(img, center=(cx,cy), radius=Rout)
     
     semimajor = []
-    near = []
     
     for i in rad:
         
@@ -658,31 +656,11 @@ def _position_angle(img, cx=None, cy=None, beam=None):
         theta = np.rad2deg(np.arctan2(y,x)) - 90
         
         semimajor.append(theta)
-        
-        tred_max = phi_deg[np.nanargmax(annuli)]
-        tblue_max = phi_deg[np.nanargmin(annuli)]
-        
-        bend = np.average([tred_max, tblue_max])
-        
-        if (tred_max - bend) < 90:
-            if bend < 180:
-                bend += 180
-            elif bend > 180:
-                bend -= 180
-        bend -= 90
-        
-        near.append(bend)
 
     PA = np.average(semimajor)
     if PA < -90:
         PA += 360
         
-    nearside = np.average(near)
-    if nearside < -90:
-        nearside += 360
-        
-    print(nearside)
-    sys.exit()
-    return PA, nearside, Rout
+    return PA, Rout
 
 
