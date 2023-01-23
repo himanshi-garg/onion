@@ -180,6 +180,7 @@ class EXTRACT:
         beam = self.bmaj/self.pixelscale
 
         surfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,3], None)
+        rsurfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,3], None)
 
         phi = np.deg2rad(np.arange(0,360,1))
         phi[phi > np.pi] -= 2*np.pi
@@ -210,6 +211,8 @@ class EXTRACT:
                     
                     surfaces[i,k,0,:] = np.concatenate((up1,[phi0]))
                     surfaces[i,k,1,:] = np.concatenate((up2,[phi1]))
+                    rsurfaces[i,k,0,:] = np.concatenate((up1,[phi0]))
+                    rsurfaces[i,k,1,:] = np.concatenate((up2,[phi1]))
                     
                 if len(sorted_peaks) >= 4:
                     if np.all(phi[sorted_peaks[2:4]] > np.pi/2) or np.all(phi[sorted_peaks[2:4]] < -np.pi/2):
@@ -223,37 +226,45 @@ class EXTRACT:
                     
                     surfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
                     surfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
-            
-            coord0 = np.full([4,2], None)
+                    rsurfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
+                    rsurfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
+                    
+            coord0 = np.full([4,2], None) #(x,y)
             
             for vx in range(4):
                 if surfaces[i,:,vx,:].any():
-                    donkey = surfaces[i,:,vx,2].copy()
-                    for k in rad:
-                        if donkey[k] != None:
-                            donkey[k] = np.rad2deg(donkey[k])
-                            donkey[k] += 360 if donkey[k] < 0 else 0
-                    boulder = np.nanstd(donkey[np.where(donkey != None)])
-                    if i == tchans[30]:
-                        print(boulder)
-                        #print(donkey)
-                    donkey0 = donkey[donkey != None][0]
+                    degs = surfaces[i,:,vx,2][np.where(surfaces[i,:,vx,2] != None)]
+                    degs = np.rad2deg(degs.astype(float))
+                    degs[degs < 0] += 360
+                    boulder = np.nanstd(degs)
+
+                    if boulder < 3.:
+                        continue
+
+                    coord0[vx,0] = surfaces[i,:,vx,1][surfaces[i,:,vx,1] != None][0]
+                    coord0[vx,1] = surfaces[i,:,vx,0][surfaces[i,:,vx,0] != None][0]
                 
                     for k in rad:
-                        if donkey[k] is not None:
-                            fiona = abs(donkey[k] - donkey0)
-                            if fiona > boulder:
+                        if surfaces[i,k,vx,:].all():
+
+                            v1 = np.array([coord0[vx,0],coord0[vx,1]]) - np.array([self.com[1],self.com[0]])
+                            v2 = np.array([surfaces[i,k,vx,1],surfaces[i,k,vx,0]]) - np.array([self.com[1],self.com[0]])
+                            fiona = np.rad2deg(np.arctan2(np.linalg.det([v1,v2]),np.dot(v1,v2)))
+
+                            if abs(fiona) > boulder:
                                 surfaces[i,k,vx,:] = None
                             else:
-                                donkey0 = donkey[k]
+                                coord0[vx,0] = surfaces[i,k,vx,1]
+                                coord0[vx,1] = surfaces[i,k,vx,0]
 
             for k in rad:
                 if np.any(surfaces[i,k,:2,:] == None):
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-        sys.exit()
+        
         self.surfaces = surfaces
+        self.rsurfaces = rsurfaces
         self.tchans = tchans
 
 
@@ -270,7 +281,7 @@ class EXTRACT:
             for vx in range(2):
                 if self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,:].any():
                     phi0 = self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2][np.where(self.surfaces[i,:,(vx+2)*vx:(vx*2)+2,2] != None)]
-                    if len(phi0[np.where(abs(abs(phi0)-np.pi/2) < np.deg2rad(10))]) > 0.5*len(phi0):
+                    if len(phi0[np.where(abs(abs(phi0)-np.pi/2) < np.deg2rad(15))]) > 0.5*len(phi0):
                         continue
                     else:
                         x0 = self.surfaces[i,:,(vx+2)*vx,1][np.where(self.surfaces[i,:,(vx+2)*vx,1] != None)]
@@ -434,7 +445,7 @@ class EXTRACT:
         
         print('PLOTTING SURFACE TRACES')
             
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_2.pdf')
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
 
         for i in tqdm(self.tchans, total=len(self.tchans)):      
             fig, ax = plt.subplots(figsize=(6,6))
@@ -446,12 +457,17 @@ class EXTRACT:
             ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
             ax.set(xlabel='pixels', ylabel='pixels')
 
-            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='rebeccapurple')
-            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='mediumorchid')
-            ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='darkorange')
-            ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='goldenrod')
-            ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='thistle', label='avg. upper surface')
-            ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='wheat', label='avg. lower surface')
+            ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='whitesmoke')
+            ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='whitesmoke')
+            ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='whitesmoke')
+            ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='whitesmoke')
+            
+            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='darkorange')
+            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='goldenrod')
+            ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='lightcoral')
+            ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='firebrick')
+            ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='silver', label='avg. upper surface')
+            ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='silver', label='avg. lower surface')
             ax.legend(loc='upper right', fontsize=7)
             bounds = self.Rout*1.1
             ax.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
