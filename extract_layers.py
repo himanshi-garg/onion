@@ -229,40 +229,48 @@ class EXTRACT:
                     rsurfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
                     rsurfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
                     
-            coord0 = np.full([4,2], None) #(x,y)
+                  
+            coord0 = np.full([4,2], None) #(y,x)
+            coord0[:,:] = [self.com[0],self.com[1]]
+            grad0 = np.full([4,2], None)
             
             for vx in range(4):
                 if surfaces[i,:,vx,:].any():
-                    degs = surfaces[i,:,vx,2][np.where(surfaces[i,:,vx,2] != None)]
-                    degs = np.rad2deg(degs.astype(float))
-                    degs[degs < 0] += 360
-                    boulder = np.nanstd(degs)
 
-                    if boulder < 3.:
-                        continue
+                    layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
+                    layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
 
-                    coord0[vx,0] = surfaces[i,:,vx,1][surfaces[i,:,vx,1] != None][0]
-                    coord0[vx,1] = surfaces[i,:,vx,0][surfaces[i,:,vx,0] != None][0]
-                
+                    ggrady = [layery[lx]/layery[lx-1] for lx in range(1,len(layery))]
+                    ggradx = [layerx[lx]/layerx[lx-1] for lx in range(1,len(layerx))]
+
+                    gvoly = np.nanstd(np.log(ggrady)) 
+                    gvolx = np.nanstd(np.log(ggradx)) 
+
+                    #print(gvoly, gvolx)
+                    
                     for k in rad:
                         if surfaces[i,k,vx,:].all():
+                            grady = surfaces[i,k,vx,0] / coord0[vx,0]
+                            gradx = surfaces[i,k,vx,1] / coord0[vx,1]  
 
-                            v1 = np.array([coord0[vx,0],coord0[vx,1]]) - np.array([self.com[1],self.com[0]])
-                            v2 = np.array([surfaces[i,k,vx,1],surfaces[i,k,vx,0]]) - np.array([self.com[1],self.com[0]])
-                            fiona = np.rad2deg(np.arctan2(np.linalg.det([v1,v2]),np.dot(v1,v2)))
-
-                            if abs(fiona) > boulder:
-                                surfaces[i,k,vx,:] = None
+                            if grad0[vx,0] is None:
+                                grad0[vx,:] = [grady,gradx]
                             else:
-                                coord0[vx,0] = surfaces[i,k,vx,1]
-                                coord0[vx,1] = surfaces[i,k,vx,0]
+                                voly = np.nanstd([np.log(grady), np.log(grad0[vx,0])])
+                                volx = np.nanstd([np.log(gradx), np.log(grad0[vx,1])])
 
+                                if voly > 3.*gvoly or volx > 3.*gvolx:
+                                    surfaces[i,k,vx,:] = None
+                                else:
+                                    coord0[vx,:] = [surfaces[i,k,vx,0], surfaces[i,k,vx,1]]
+                                    grad0[vx,:] = [grady, gradx]
+                    
             for k in rad:
                 if np.any(surfaces[i,k,:2,:] == None):
                     surfaces[i,k,:2,:] = None
                 if np.any(surfaces[i,k,2:4,:] == None):
                     surfaces[i,k,2:4,:] = None
-        
+                    
         self.surfaces = surfaces
         self.rsurfaces = rsurfaces
         self.tchans = tchans
@@ -270,9 +278,9 @@ class EXTRACT:
 
     def _extract_surface(self):
 
-        mid = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
-        top = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
-        bot = np.full([self.nv,(self.Rout+1).astype(np.int),2,2], None)
+        mid = np.full([self.nv,2*(self.Rout+1).astype(np.int),2,2], None)
+        top = np.full([self.nv,2*(self.Rout+1).astype(np.int),2,2], None)
+        bot = np.full([self.nv,2*(self.Rout+1).astype(np.int),2,2], None)
         
         vchans = []
         hslope = []
@@ -290,7 +298,9 @@ class EXTRACT:
                         y1 = self.surfaces[i,:,(vx*2)+1,0][np.where(self.surfaces[i,:,(vx*2)+1,0] != None)]
                         b0 = np.max([np.min(x0),np.min(x1)])
                         b1 = np.min([np.max(x0),np.max(x1)])
-                        x = np.sort(np.arange(b0,b1,1))[::-1]
+                        x = np.hstack((x0,x1))
+                        x = x[(x >= b0) & (x <= b1)]
+                        x = np.sort(x)[::-1]
                         if len(x) == 0:
                             continue
                         else:
@@ -314,14 +324,13 @@ class EXTRACT:
         else:
             self.nearside = self.PA - 90
             hdir = 1
-            
-        if self.nearside < -90:
-            self.nearside += 360
 
-        sR = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
-        sH = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
-        sV = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
-        sI = np.full([self.nv,(self.Rout+1).astype(np.int),2], None)
+        self.nearside += 360 if self.nearside < -90 else -360 if self.nearside > 270 else 0
+
+        sR = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
+        sH = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
+        sV = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
+        sI = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
         
         for i in vchans:
             for vx in range(2):
@@ -348,11 +357,13 @@ class EXTRACT:
                         chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
                         I = np.mean([chan_rot[top0y.astype(int),top0x.astype(int)], chan_rot[bot0y.astype(int),bot0x.astype(int)]], axis=0)
 
+                        h[np.where(v == None)] = None
+                        v[np.where(h == None)] = None
                         r[np.where(h == None)] = None
                         r[np.where(v == None)] = None
                         I[np.where(h == None)] = None
                         I[np.where(v == None)] = None
-                        
+
                         sR[i,:len(r),vx] = r
                         sH[i,:len(r),vx] = h
                         sV[i,:len(r),vx] = v
@@ -518,7 +529,7 @@ class EXTRACT:
                 bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
                 ax.plot(bins[0,:], bins[1,:], '.', markersize=4, color='darkorange', label='avg. lower surface')
 
-            ylims = (np.nanpercentile(surfs[k].astype(float),[0.3]),np.nanpercentile(surfs[k].astype(float),[99.7])) if k == 1 else None
+            ylims = (np.nanmin(surfs[k][surfs[k] != None]),np.nanpercentile(surfs[k][np.isfinite(surfs[k].astype(float))].astype(float),[99.7])) if k == 1 else None
             ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
             ax.legend(loc='upper right', fontsize=10)
             
@@ -604,7 +615,7 @@ def _center_of_mass(img, beam=None):
     radius = np.hypot(y-y_coord,x-x_coord)
     mask = radius <= (5*beam)
 
-    masked_img = abs_imgp.copy()
+    masked_img = np.nan_to_num(abs_imgp.copy())
     masked_img[~mask] = None
 
     dx, dy = np.gradient(masked_img, edge_order=2)
