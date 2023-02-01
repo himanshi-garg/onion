@@ -108,8 +108,6 @@ class EXTRACT:
         print(f'rms [{self.iunit}] =', rms)
 
         # systemic velocity
-        print('extracting systemic velocity')
-
         line_profile = np.nansum(cube, axis=(1,2))
         vsyst, vsyst_idx = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
         
@@ -151,9 +149,7 @@ class EXTRACT:
         
         self.M1 = M1
         
-        # center of mass
-        print('extracting center of mass')
-        
+        # center of mass        
         vmap = self.M1.copy()
         beam_pix = self.bmaj/self.pixelscale
         com, M1p = _center_of_mass(vmap, beam=beam_pix)
@@ -163,8 +159,6 @@ class EXTRACT:
         self.M1p = M1p
 
         # position angle
-        print('extracting position angle')
-
         PA, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
         print('position angle (degrees) =', PA)
 
@@ -188,7 +182,7 @@ class EXTRACT:
         phi[phi > np.pi] -= 2*np.pi
         rad = np.arange(1, self.Rout.astype(np.int), 1)
         
-        for i in tchans:
+        for i in tqdm(tchans):
 
             chan = self.cube[i,:,:]
             chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
@@ -197,8 +191,11 @@ class EXTRACT:
             for k in rad:
                 
                 annuli = polar[:,k]
-              
-                peaks, properties = _peak_finder(annuli, height=4*self.rms, distance=0.5*beam, prominence=2*self.rms, width=0.5*beam)
+                annuli_wrapped = np.concatenate((annuli, annuli[:90]))
+
+                peaks, properties = _peak_finder(annuli_wrapped, height=5*self.rms, distance=beam, prominence=3*self.rms, width=0.5*beam)
+                peaks[peaks >= 360] -= 360
+                peaks = np.unique(peaks)
                 sorted_peaks = peaks[np.argsort(annuli[peaks])][::-1]
 
                 if len(sorted_peaks) >= 2:
@@ -231,39 +228,53 @@ class EXTRACT:
                     rsurfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
                     rsurfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
 
-            coord0 = np.full([4,2], None)
-            coord0[:,:] = [self.com[0],self.com[1]]
             grad0 = np.full([4], None)
+            gvol0 = np.full([4], 1.)
             
             for vx in range(4):
-                if surfaces[i,:,vx,:].any():
-
-                    layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
-                    layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
-
-                    ggrad = np.full([len(layery)], 1.)
-                    gvol_factor = np.full([len(layery)], 1.)
                     
-                    for lx in range(1, len(layery)):
-                        ggrad[lx] = abs(-layerx[lx] / layery[lx])
-                        gvol_factor[lx] = (ggrad[lx] / ggrad[lx-1])
-                    gvol = np.std(gvol_factor)
+                gvol = 100
+                
+                while(abs(np.log(gvol/gvol0[vx])) > 0.163):
+
+                    if gvol0[vx] != 1:
+                        gvol0[vx] = gvol
+                    grad0[vx] = None
+                
+                    if surfaces[i,:,vx,:].any():
+
+                        layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
+                        layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
+
+                        ggrad = np.full([len(layery)], 1.)
+                        gvol_factor = np.full([len(layery)], 1.)
                     
-                    for k in rad:
-                        if surfaces[i,k,vx,:].all():
+                        for lx in range(1, len(layery)):
+                            ggrad[lx] = abs(-layerx[lx] / layery[lx])
+                            gvol_factor[lx] = (ggrad[lx] / ggrad[lx-1])
+                        gvol = np.std(gvol_factor)
+                        
+                        for k in rad:
+                            if surfaces[i,k,vx,:].all():
 
-                            grad = abs(-surfaces[i,k,vx,1] / surfaces[i,k,vx,0])
-
-                            if grad0[vx] is None:
-                                grad0[vx] = grad
-                            else:
-                                vol_factor = (grad / grad0[vx])
-                                vol = np.nanstd([vol_factor, np.median(gvol_factor)])
-                                if vol > 2*gvol:
-                                    surfaces[i,k,vx,:] = None
-                                else:
+                                grad = abs(-surfaces[i,k,vx,1] / surfaces[i,k,vx,0])
+                            
+                                if grad0[vx] is None:
                                     grad0[vx] = grad
-                                
+                                else:
+                                    vol_factor = (grad / grad0[vx])
+                                    vol = np.nanstd([vol_factor, np.median(gvol_factor)])
+                                    if vol > 2*gvol:
+                                        surfaces[i,k,vx,:] = None
+                                    else:
+                                        grad0[vx] = grad
+                                        
+                        if gvol0[vx] == 1:
+                            gvol0[vx] = gvol
+                            gvol = 100
+                    else:
+                        break
+                                    
             for k in rad:
                 if np.any(surfaces[i,k,:2,:] == None):
                     surfaces[i,k,:2,:] = None
@@ -277,6 +288,8 @@ class EXTRACT:
 
     def _extract_surface(self):
 
+        print('EXTRACTING SURFACES')
+        
         mid = np.full([self.nv,2*(self.Rout+1).astype(np.int),2,2], None)
         top = np.full([self.nv,2*(self.Rout+1).astype(np.int),2,2], None)
         bot = np.full([self.nv,2*(self.Rout+1).astype(np.int),2,2], None)
@@ -466,7 +479,7 @@ class EXTRACT:
         
         print('PLOTTING SURFACE TRACES')
             
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_2.pdf')
 
         for i in tqdm(self.tchans, total=len(self.tchans)):
             fig, ax = plt.subplots(figsize=(6,6))
@@ -546,7 +559,7 @@ class EXTRACT:
                         ax.plot(r, tpl_fit, '-', color='navy', linewidth=1.0,
                                 label=f'fit params: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
                     except:
-                        continue
+                        pass
                 
             if self.sR[:,:,1].any():
                 ax.plot(self.sR[:,:,1].flatten(), surfs[k][:,:,1].flatten(), 'o', markersize=4, color='navajowhite', alpha=0.4, fillstyle='none', label='lower surface')
@@ -569,7 +582,7 @@ class EXTRACT:
                         ax.plot(r, tpl_fit, '-', color='darkorange', linewidth=1.0,
                                 label=f'fit params: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
                     except:
-                        continue
+                        pass
 
             ylims = (np.nanmin(surfs[k][surfs[k] != None]),np.nanpercentile(surfs[k][np.isfinite(surfs[k].astype(float))].astype(float),[99.7])) if k == 1 else None
             ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
@@ -663,8 +676,8 @@ def _center_of_mass(img, beam=None):
 
     y,x = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
     radius = np.hypot(y-y_coord,x-x_coord)
-    mask = radius <= (5*beam)
-
+    mask = (radius <= (5*beam))
+    
     masked_img = np.nan_to_num(abs_imgp.copy())
     masked_img[~mask] = None
 
