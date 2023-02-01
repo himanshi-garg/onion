@@ -235,7 +235,7 @@ class EXTRACT:
                     
                 gvol = 100
                 
-                while(abs(np.log(gvol/gvol0[vx])) > 0.163):
+                while(abs(np.log(gvol/gvol0[vx])) > 0.105):
 
                     if gvol0[vx] != 1:
                         gvol0[vx] = gvol
