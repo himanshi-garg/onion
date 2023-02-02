@@ -623,13 +623,7 @@ def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
     coeff, var_matrix = curve_fit(gauss, channels, profile, p0=p0)
     gauss_fit = gauss(channels, *coeff)
 
-    # for gaussian fit
     vsyst_idx = channels[np.argmax(gauss_fit)]
-
-    # for double peaked gaussian fit
-    #peaks, properties = _peak_finder(-gauss_fit, height=-np.nanmax(profile), width=5)
-    #vsyst_idx = peaks[np.argmin(properties["peak_heights"])]
-    
     vsyst = v0 + (dv * vsyst_idx)
 
     return vsyst, vsyst_idx, gauss_fit
@@ -692,7 +686,8 @@ def _center_of_mass(img, beam=None):
     masked_img = np.nan_to_num(abs_imgp.copy())
     masked_img[~mask] = None
 
-    dx, dy = np.gradient(masked_img, edge_order=2)
+    dx = ndimage.sobel(masked_img, axis=0, mode='nearest')
+    dy = ndimage.sobel(masked_img, axis=1, mode='nearest')
     grad_img = np.hypot(dy,dx)
 
     kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
