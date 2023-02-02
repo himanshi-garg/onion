@@ -13,6 +13,7 @@ from astropy.io import fits
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from scipy import stats
+from scipy import signal
 from tqdm import tqdm
 from scipy import ndimage
 from skimage.measure import regionprops
@@ -79,7 +80,7 @@ class EXTRACT:
         self.imgcx = hdu[0].header['CRPIX1']
         self.imgcy = hdu[0].header['CRPIX2']
 
-        if hdu[0].header['CTYPE3'] == 'VRAD':
+        if hdu[0].header['CTYPE3'] == 'VRAD' or hdu[0].header['CTYPE3'] == 'VELO-LSR':
             self.velocity = hdu[0].header['CRVAL3'] + (np.arange(hdu[0].header['NAXIS3']) * hdu[0].header['CDELT3'])
             if hdu[0].header['CUNIT3'] == 'km/s':
                 self.velocity *= 1000
@@ -109,13 +110,14 @@ class EXTRACT:
 
         # systemic velocity
         line_profile = np.nansum(cube, axis=(1,2))
-        vsyst, vsyst_idx = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
+        vsyst, vsyst_idx, gauss_fit = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
         
         print('systemic velocity (m/s) =', vsyst)
         
         self.vsyst = vsyst
         self.vsyst_idx = vsyst_idx
         self.line_profile = line_profile
+        self.gauss_fit = gauss_fit
         
         # velocity map
         '''
@@ -229,51 +231,39 @@ class EXTRACT:
                     rsurfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
 
             grad0 = np.full([4], None)
-            gvol0 = np.full([4], 1.)
             
             for vx in range(4):
+                if surfaces[i,:,vx,:].any():
+
+                    layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
+                    layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
+
+                    ggrad = np.full([len(layery)], 1.)
+                    gvol_factor = np.full([len(layery)], 1.)
                     
-                gvol = 100
-                
-                while(abs(np.log(gvol/gvol0[vx])) > 0.105):
+                    for lx in range(1, len(layery)):
+                        ggrad[lx] = abs(-layerx[lx] / layery[lx])
+                        gvol_factor[lx] = (ggrad[lx] / ggrad[lx-1])
 
-                    if gvol0[vx] != 1:
-                        gvol0[vx] = gvol
-                    grad0[vx] = None
-                
-                    if surfaces[i,:,vx,:].any():
-
-                        layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
-                        layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
-
-                        ggrad = np.full([len(layery)], 1.)
-                        gvol_factor = np.full([len(layery)], 1.)
-                    
-                        for lx in range(1, len(layery)):
-                            ggrad[lx] = abs(-layerx[lx] / layery[lx])
-                            gvol_factor[lx] = (ggrad[lx] / ggrad[lx-1])
-                        gvol = np.std(gvol_factor)
-                        
-                        for k in rad:
-                            if surfaces[i,k,vx,:].all():
-
-                                grad = abs(-surfaces[i,k,vx,1] / surfaces[i,k,vx,0])
+                    gvol = stats.iqr(gvol_factor[2:])
+                    std = np.std(gvol_factor[2:])
+                    factor = std / gvol
+                    threshold = 2*np.sqrt(factor)*gvol
                             
-                                if grad0[vx] is None:
-                                    grad0[vx] = grad
+                    for k in rad:
+                        if surfaces[i,k,vx,:].all():
+                            
+                            grad = abs(-surfaces[i,k,vx,1] / surfaces[i,k,vx,0])
+                            
+                            if grad0[vx] is None:
+                                grad0[vx] = grad
+                            else:
+                                vol_factor = (grad / grad0[vx])
+                                vol = np.std([vol_factor, np.median(gvol_factor)])
+                                if vol > threshold:
+                                    surfaces[i,k,vx,:] = None
                                 else:
-                                    vol_factor = (grad / grad0[vx])
-                                    vol = np.nanstd([vol_factor, np.median(gvol_factor)])
-                                    if vol > 2*gvol:
-                                        surfaces[i,k,vx,:] = None
-                                    else:
-                                        grad0[vx] = grad
-                                        
-                        if gvol0[vx] == 1:
-                            gvol0[vx] = gvol
-                            gvol = 100
-                    else:
-                        break
+                                    grad0[vx] = grad
                                     
             for k in rad:
                 if np.any(surfaces[i,k,:2,:] == None):
@@ -297,7 +287,7 @@ class EXTRACT:
         vchans = []
         hslope = []
 
-        for i in self.tchans:
+        for i in tqdm(self.tchans):
             for vx in range(2):
                 if self.surfaces[i,:,(vx+1)*vx:(vx*2)+2,:].any():
                     phi0 = self.surfaces[i,:,(vx+1)*vx:(vx*2)+2,2][np.where(self.surfaces[i,:,(vx+1)*vx:(vx*2)+2,2] != None)]
@@ -346,7 +336,7 @@ class EXTRACT:
         sV = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
         sI = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
         
-        for i in vchans:
+        for i in tqdm(vchans):
             for vx in range(2):
                 if self.surfaces[i,:,(vx+1)*vx:(vx*2)+2,:].any():
                     mid0x = mid[i,:,vx,1][np.where(mid[i,:,vx,1] != None)]
@@ -413,7 +403,8 @@ class EXTRACT:
             if i == 0:
                 # line profile for systemic velocity
                 ax.plot(self.line_profile, color='black', linewidth=1.0)
-                ax.plot(self.vsyst_idx, self.line_profile[self.vsyst_idx], '.', markersize=10, color='red', label=f'vlsr = {self.vsyst:.3f} m/s')
+                ax.plot(self.gauss_fit, color='firebrick', linestyle='--', linewidth=1.0)
+                ax.plot(self.vsyst_idx, self.line_profile[self.vsyst_idx], '.', markersize=10, color='firebrick', label=f'vlsr = {self.vsyst:.3f} m/s')
                 ax.legend(loc='upper right', fontsize=7)
                 ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.iunit}]', title='systemic velocity')
                 axins = inset_axes(ax, width="30%", height="30%",loc='upper left')
@@ -426,7 +417,7 @@ class EXTRACT:
                 # velocity map for centre of mass
                 fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1p/1000,[1]), vmax=np.nanpercentile(self.M1p/1000,[99]))
                 ax.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black',
-                        label=f'C.O.M.: [{self.com[0]},{self.com[1]}] pixels, \n [{(self.com[0]-self.imgcy)*self.pixelscale:.3f},{(self.com[1]-self.imgcx)*self.pixelscale:.3f}] $\Delta$arcs')
+                        label=f'COM (y,x): [{self.com[0]},{self.com[1]}] pixels, \n [{(self.com[0]-self.imgcy)*self.pixelscale:.3f},{(self.com[1]-self.imgcx)*self.pixelscale:.3f}] $\Delta$arcs')
                 ax.set(xlabel='pixels', ylabel='pixels', title='dynamical centre')
                 ax.legend(loc='upper left', fontsize=8, framealpha=1.0)
                 divider = make_axes_locatable(ax)
@@ -465,7 +456,7 @@ class EXTRACT:
                               self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA+90)))]
                 minor_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA))),
                               self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA)))]
-                ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'P.A. = {self.PA:.3f}$^\circ$')
+                ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'PA = {self.PA:.3f}$^\circ$')
                 ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'nearside = {self.nearside:.3f}$^\circ$')
                 near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
                 rot = self.nearside-180 if self.nearside > 90 else self.nearside
@@ -476,10 +467,10 @@ class EXTRACT:
             plt.close(fig)
         pdf.close()
         
-        
+
         print('PLOTTING SURFACE TRACES')
             
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_2.pdf')
+        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
 
         for i in tqdm(self.tchans, total=len(self.tchans)):
             fig, ax = plt.subplots(figsize=(6,6))
@@ -491,10 +482,10 @@ class EXTRACT:
             ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
             ax.set(xlabel='pixels', ylabel='pixels')
 
-            #ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='whitesmoke')
-            #ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='whitesmoke')
-            #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='whitesmoke')
-            #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='whitesmoke')
+            #ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
+            #ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
+            #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
+            #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
             
             ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='blueviolet', label='upper surface')
             ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='blueviolet')
@@ -542,22 +533,24 @@ class EXTRACT:
                 ax.plot(self.sR[:,:,0].flatten(), surfs[k][:,:,0].flatten(), 'o', markersize=4, color='lightsteelblue', alpha=0.4, fillstyle='none', label='upper surface')
                 x1 = self.sR[:,:,0][self.sR[:,:,0] != None].flatten()
                 y1 = surfs[k][:,:,0][surfs[k][:,:,0] != None].flatten()
+                idx = np.argsort(x1)
+                x1, y1 = x1[idx], y1[idx]
+                win = signal.windows.hann(int(self.bmaj/self.pixelscale))
+                y1 = signal.convolve(y1, win, mode='same') / sum(win)
                 bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
                 ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='navy', markeredgecolor='whitesmoke', markeredgewidth=0.3, label='avg. upper surface')
 
                 if k == 0:
                     try:
-                        r = self.sR[:,:,0].flatten()[self.sR[:,:,0].flatten() != None].astype(float)
-                        z = self.sH[:,:,0].flatten()[self.sH[:,:,0].flatten() != None].astype(float)
-                        idx = np.argsort(r)
-                        r, z = r[idx], z[idx]
-                        z0 = z[np.argmin(abs(r - 1.0))]
+                        r = bins[0,:][np.isfinite(bins[0,:])].astype(float)
+                        z = bins[1,:][np.isfinite(bins[1,:])].astype(float)
+                        z0 = z[np.nanargmin(abs(r - 1.0))]
                         q, r_taper, q_taper = 1.0, 2.0, 1.0
                         p0 = [z0, q, r_taper, q_taper]
                         coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
                         tpl_fit = tapered_powerlaw(r, *coeff)
                         ax.plot(r, tpl_fit, '-', color='navy', linewidth=1.0,
-                                label=f'fit params: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
+                                label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
                     except:
                         pass
                 
@@ -565,22 +558,24 @@ class EXTRACT:
                 ax.plot(self.sR[:,:,1].flatten(), surfs[k][:,:,1].flatten(), 'o', markersize=4, color='navajowhite', alpha=0.4, fillstyle='none', label='lower surface')
                 x1 = self.sR[:,:,1][self.sR[:,:,1] != None].flatten()
                 y1 = surfs[k][:,:,1][surfs[k][:,:,1] != None].flatten()
+                idx = np.argsort(x1)
+                x1, y1 = x1[idx], y1[idx]
+                win = signal.windows.hann(int(self.bmaj/self.pixelscale))
+                y1 = signal.convolve(y1, win, mode='same') / sum(win)
                 bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
-                ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='darkorange', markeredgecolor='gold', markeredgewidth=0.3, label='avg. lower surface')
+                ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='darkorange', markeredgecolor='gold', markeredgewidth=0.3, label='avg. lower surface') 
 
                 if k == 0:
                     try:
-                        r = self.sR[:,:,1].flatten()[self.sR[:,:,1].flatten() != None].astype(float)
-                        z = self.sH[:,:,1].flatten()[self.sH[:,:,1].flatten() != None].astype(float)
-                        idx = np.argsort(r)
-                        r, z = r[idx], z[idx]
+                        r = bins[0,:][np.isfinite(bins[0,:])].astype(float)
+                        z = bins[1,:][np.isfinite(bins[1,:])].astype(float) 
                         z0 = z[np.argmin(abs(r - 1.0))]
                         q, r_taper, q_taper = 1.0, 2.0, 1.0
                         p0 = [z0, q, r_taper, q_taper]
                         coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
                         tpl_fit = tapered_powerlaw(r, *coeff)
                         ax.plot(r, tpl_fit, '-', color='darkorange', linewidth=1.0,
-                                label=f'fit params: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
+                                label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
                     except:
                         pass
 
@@ -628,10 +623,16 @@ def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
     coeff, var_matrix = curve_fit(gauss, channels, profile, p0=p0)
     gauss_fit = gauss(channels, *coeff)
 
+    # for gaussian fit
     vsyst_idx = channels[np.argmax(gauss_fit)]
+
+    # for double peaked gaussian fit
+    #peaks, properties = _peak_finder(-gauss_fit, height=-np.nanmax(profile), width=5)
+    #vsyst_idx = peaks[np.argmin(properties["peak_heights"])]
+    
     vsyst = v0 + (dv * vsyst_idx)
 
-    return vsyst, vsyst_idx
+    return vsyst, vsyst_idx, gauss_fit
     
 
 def gauss(x, *p):
@@ -639,6 +640,16 @@ def gauss(x, *p):
     amp, center, sigma = p
     
     return (amp / (np.sqrt(2.*np.pi)*sigma)) * np.exp(-abs(x-center)**2 / (2.*sigma**2))
+
+
+def double_gauss(x, *p):
+    
+    amp1, center1, sigma1, amp2, center2, sigma2, = p
+
+    gaus1 = (amp1 / (np.sqrt(2.*np.pi)*sigma1)) * np.exp(-abs(x-center1)**2 / (2.*sigma1**2))
+    gaus2 = (amp2 / (np.sqrt(2.*np.pi)*sigma2)) * np.exp(-abs(x-center2)**2 / (2.*sigma2**2))
+    
+    return gaus1 + gaus2
 
 
 def tapered_powerlaw(r, *p):
@@ -659,7 +670,7 @@ def _center_of_mass(img, beam=None):
     imgp[res == 1] = None
 
     abs_imgp = abs(imgp)
-
+    
     normalizer = np.nansum(abs_imgp)
     grids = np.ogrid[[slice(0, i) for i in abs_imgp.shape]]
 
