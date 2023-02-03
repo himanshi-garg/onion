@@ -1,11 +1,12 @@
 # Onion
 
 <p align="center">
-<img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="600" height="400">
-</p>
-<p align="center">
-A surface extraction code for planetary discs.  
-Based on the theoretical method outlined in **Pinte et al. 2018**.
+  <br>
+  <img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="600" height="400"><br>
+  <br>
+  A surface extraction code for planetary discs.<br/>
+  Based on the theoretical method outlined in **Pinte et al. 2018**.<br/>
+  <br>
 </p>
 
 Extracts **altitude (z)**, **velocity** and **intensity profiles** as functions of radius for an emitting surface.  
