@@ -5,7 +5,7 @@
   <img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="600" height="400"><br/>
   <br>
   A surface extraction code for planetary discs.<br/>
-  Based on the theoretical method outlined in <b>Pinte et al. 2018**</b>.
+  Based on the theoretical method outlined in <b>Pinte et al. 2018</b>.
   <br/>
 </p>
 
