@@ -27,3 +27,8 @@ onion.extract_layers('<fits file>', inc=<source inclination>)
 
 ## Citation:
 if you use Onion in your research, please cite the github link.
+
+## Requirements:
+- numpy       - matplotlib
+- astropy     - scipy
+- skimage     - cmasher
