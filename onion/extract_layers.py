@@ -459,124 +459,134 @@ class EXTRACT:
         
 
         print('PLOTTING SURFACE TRACES')
-            
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
 
-        for i in tqdm(self.tchans, total=len(self.tchans)):
-            fig, ax = plt.subplots(figsize=(6,6))
+        if np.any(self.surfaces[:,:,:,:]):
 
-            chan = self.cube[i,:,:]
-            chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
+            pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
+            
+            for i in tqdm(self.tchans, total=len(self.tchans)):
+                fig, ax = plt.subplots(figsize=(6,6))
 
-            fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(self.cube))
-            ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
-            ax.set(xlabel='pixels', ylabel='pixels')
+                chan = self.cube[i,:,:]
+                chan_rot = _rotate_disc(chan, angle=self.PA+90, cx=self.com[1], cy=self.com[0])
 
-            #ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
-            #ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
-            #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
-            #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
+                fig1 = ax.imshow(chan_rot, origin='lower', cmap=cmr.swamp, vmin=0, vmax=np.nanmax(self.cube))
+                ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
+                ax.set(xlabel='pixels', ylabel='pixels')
+
+                #ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
             
-            ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='blueviolet', label='upper surface')
-            ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='blueviolet')
-            ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='crimson', label='lower surface')
-            ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='crimson')
-            ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='lavender', label='mid upper surface')
-            ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='pink', label='mid lower surface')
-            ax.legend(loc='upper right', fontsize=7, markerscale=2)
-            bounds = self.Rout*1.1
-            ax.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
+                ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='blueviolet', label='upper surface')
+                ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='blueviolet')
+                ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='crimson', label='lower surface')
+                ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='crimson')
+                ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='lavender', label='mid upper surface')
+                ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='pink', label='mid lower surface')
+                ax.legend(loc='upper right', fontsize=7, markerscale=2)
+                bounds = self.Rout*1.1
+                ax.set(xlim = (self.com[1]-bounds,self.com[1]+bounds), ylim = (self.com[0]-bounds,self.com[0]+bounds))
             
-            beam = Ellipse(xy=(self.com[1]-self.Rout,self.com[0]-self.Rout), width=self.bmin/self.pixelscale,
-                           height=self.bmaj/self.pixelscale, angle=-self.bpa, fill=True, color='white')
-            ax.add_patch(beam)
-            
-            divider = make_axes_locatable(ax)
-            colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
-            cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax)
-            cbar.ax.tick_params(labelsize=8)
-            cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
-            tick_locator = ticker.MaxNLocator(nbins=5)
-            cbar.locator = tick_locator
-            cbar.update_ticks()
-            cbar.set_label(f'flux [{self.iunit}]', labelpad=9, fontsize=12, weight='bold')
+                beam = Ellipse(xy=(self.com[1]-self.Rout,self.com[0]-self.Rout), width=self.bmin/self.pixelscale,
+                               height=self.bmaj/self.pixelscale, angle=-self.bpa, fill=True, color='white')
+                ax.add_patch(beam)
+                
+                divider = make_axes_locatable(ax)
+                colorbar_cax = divider.append_axes('right', size='4%', pad=0.05)
+                cbar = fig.colorbar(fig1, shrink=0.97, aspect=70, spacing='proportional', orientation='vertical', cax=colorbar_cax)
+                cbar.ax.tick_params(labelsize=8)
+                cbar.ax.xaxis.set(ticks_position = 'top', label_position = 'top')
+                tick_locator = ticker.MaxNLocator(nbins=5)
+                cbar.locator = tick_locator
+                cbar.update_ticks()
+                cbar.set_label(f'flux [{self.iunit}]', labelpad=9, fontsize=12, weight='bold')
         
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close(fig)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
         
-        pdf.close()
+            pdf.close()
+            
+        else:
+            print('no valid surface traces')
         
 
         print('PLOTTING SURFACES')
 
-        self.sH[np.where(self.sH != None)] *= self.pixelscale
-        self.sR[np.where(self.sR != None)] *= self.pixelscale
-        
-        surfs = {0: self.sH, 1: self.sV, 2: self.sI}
-        ylabels = ['z [arcsec]', 'v [m/s]', f'flux [{self.iunit}]']
-        
-        pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles.pdf')
-        for k in tqdm(range(3)):
+        if np.any(self.sR):
 
-            fig, ax = plt.subplots(figsize=(6,6))
-            if self.sR[:,:,0].any():
-                ax.plot(self.sR[:,:,0].flatten(), surfs[k][:,:,0].flatten(), 'o', markersize=4, color='lightsteelblue', alpha=0.4, fillstyle='none', label='upper surface')
-                x1 = self.sR[:,:,0][self.sR[:,:,0] != None].flatten()
-                y1 = surfs[k][:,:,0][surfs[k][:,:,0] != None].flatten()
-                idx = np.argsort(x1)
-                x1, y1 = x1[idx], y1[idx]
-                win = signal.windows.hann(int(self.bmaj/self.pixelscale))
-                y1 = signal.convolve(y1, win, mode='same') / sum(win)
-                bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
-                ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='navy', markeredgecolor='whitesmoke', markeredgewidth=0.3, label='avg. upper surface')
+            self.sH[np.where(self.sH != None)] *= self.pixelscale
+            self.sR[np.where(self.sR != None)] *= self.pixelscale
+        
+            surfs = {0: self.sH, 1: self.sV, 2: self.sI}
+            ylabels = ['z [arcsec]', 'v [m/s]', f'flux [{self.iunit}]']
+        
+            pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles.pdf')
+            for k in tqdm(range(3)):
 
-                if k == 0:
-                    try:
-                        r = bins[0,:][np.isfinite(bins[0,:])].astype(float)
-                        z = bins[1,:][np.isfinite(bins[1,:])].astype(float)
-                        z0 = z[np.nanargmin(abs(r - 1.0))]
-                        q, r_taper, q_taper = 1.0, 2.0, 1.0
-                        p0 = [z0, q, r_taper, q_taper]
-                        coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
-                        tpl_fit = tapered_powerlaw(r, *coeff)
-                        ax.plot(r, tpl_fit, '-', color='navy', linewidth=1.0,
-                                label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
-                    except:
-                        pass
+                fig, ax = plt.subplots(figsize=(6,6))
+                if self.sR[:,:,0].any():
+                    ax.plot(self.sR[:,:,0].flatten(), surfs[k][:,:,0].flatten(), 'o', markersize=4, color='lightsteelblue', alpha=0.4, fillstyle='none', label='upper surface')
+                    x1 = self.sR[:,:,0][self.sR[:,:,0] != None].flatten()
+                    y1 = surfs[k][:,:,0][surfs[k][:,:,0] != None].flatten()
+                    idx = np.argsort(x1)
+                    x1, y1 = x1[idx], y1[idx]
+                    win = signal.windows.hann(int(self.bmaj/self.pixelscale))
+                    y1 = signal.convolve(y1, win, mode='same') / sum(win)
+                    bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
+                    ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='navy', markeredgecolor='whitesmoke', markeredgewidth=0.3, label='avg. upper surface')
+
+                    if k == 0:
+                        try:
+                            r = bins[0,:][np.isfinite(bins[0,:])].astype(float)
+                            z = bins[1,:][np.isfinite(bins[1,:])].astype(float)
+                            z0 = z[np.nanargmin(abs(r - 1.0))]
+                            q, r_taper, q_taper = 1.0, 2.0, 1.0
+                            p0 = [z0, q, r_taper, q_taper]
+                            coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
+                            tpl_fit = tapered_powerlaw(r, *coeff)
+                            ax.plot(r, tpl_fit, '-', color='navy', linewidth=1.0,
+                                    label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
+                        except:
+                            pass
                 
-            if self.sR[:,:,1].any():
-                ax.plot(self.sR[:,:,1].flatten(), surfs[k][:,:,1].flatten(), 'o', markersize=4, color='navajowhite', alpha=0.4, fillstyle='none', label='lower surface')
-                x1 = self.sR[:,:,1][self.sR[:,:,1] != None].flatten()
-                y1 = surfs[k][:,:,1][surfs[k][:,:,1] != None].flatten()
-                idx = np.argsort(x1)
-                x1, y1 = x1[idx], y1[idx]
-                win = signal.windows.hann(int(self.bmaj/self.pixelscale))
-                y1 = signal.convolve(y1, win, mode='same') / sum(win)
-                bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
-                ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='darkorange', markeredgecolor='gold', markeredgewidth=0.3, label='avg. lower surface') 
+                if self.sR[:,:,1].any():
+                    ax.plot(self.sR[:,:,1].flatten(), surfs[k][:,:,1].flatten(), 'o', markersize=4, color='navajowhite', alpha=0.4, fillstyle='none', label='lower surface')
+                    x1 = self.sR[:,:,1][self.sR[:,:,1] != None].flatten()
+                    y1 = surfs[k][:,:,1][surfs[k][:,:,1] != None].flatten()
+                    idx = np.argsort(x1)
+                    x1, y1 = x1[idx], y1[idx]
+                    win = signal.windows.hann(int(self.bmaj/self.pixelscale))
+                    y1 = signal.convolve(y1, win, mode='same') / sum(win)
+                    bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
+                    ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='darkorange', markeredgecolor='gold', markeredgewidth=0.3, label='avg. lower surface') 
 
-                if k == 0:
-                    try:
-                        r = bins[0,:][np.isfinite(bins[0,:])].astype(float)
-                        z = bins[1,:][np.isfinite(bins[1,:])].astype(float) 
-                        z0 = z[np.argmin(abs(r - 1.0))]
-                        q, r_taper, q_taper = 1.0, 2.0, 1.0
-                        p0 = [z0, q, r_taper, q_taper]
-                        coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
-                        tpl_fit = tapered_powerlaw(r, *coeff)
-                        ax.plot(r, tpl_fit, '-', color='darkorange', linewidth=1.0,
-                                label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
-                    except:
-                        pass
+                    if k == 0:
+                        try:
+                            r = bins[0,:][np.isfinite(bins[0,:])].astype(float)
+                            z = bins[1,:][np.isfinite(bins[1,:])].astype(float) 
+                            z0 = z[np.argmin(abs(r - 1.0))]
+                            q, r_taper, q_taper = 1.0, 2.0, 1.0
+                            p0 = [z0, q, r_taper, q_taper]
+                            coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
+                            tpl_fit = tapered_powerlaw(r, *coeff)
+                            ax.plot(r, tpl_fit, '-', color='darkorange', linewidth=1.0,
+                                    label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
+                        except:
+                            pass
 
-            ylims = (np.nanmin(surfs[k][surfs[k] != None]),np.nanpercentile(surfs[k][np.isfinite(surfs[k].astype(float))].astype(float),[99.7])) if k == 1 else None
-            ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
-            ax.legend(loc='best', fontsize=6, markerscale=1.5)
+                ylims = (np.nanmin(surfs[k][surfs[k] != None]),np.nanpercentile(surfs[k][np.isfinite(surfs[k].astype(float))].astype(float),[99.7])) if k == 1 else None
+                ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
+                ax.legend(loc='best', fontsize=6, markerscale=1.5)
             
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close(fig)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
             
-        pdf.close()
+            pdf.close()
+
+        else:
+            print('no valid surfaces')
         
         
 #################
