@@ -4,12 +4,13 @@ A Surface Extraction Code for Planetary Discs, based on the theoretical method o
 Extracts:
 * altitude (z),
 * velocity (v),
-* intensity (Int) / brightness temperature (Tb),
+* intensity (Int) / brightness temperature (Tb),  
+
 as functions of radius (r) for an emitting surface.  
 
 Additionally, provides quick estimates for:
 * position angle (PA)
-* systemic velocity (vsyst)
+* systemic velocity (v0)
 * dynamical centre (y0, x0)
 * near facing side
 
