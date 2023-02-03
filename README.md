@@ -31,15 +31,15 @@ if you use Onion in your research, please cite the github link.
 ## Requirements:
 <table border="0">
  <tr>
-    <td>- numpy</td>
-    <td>- matplotlib</td>
+    <td>numpy</td>
+    <td>matplotlib</td>
  </tr>
  <tr>
-    <td>- astropy</td>
-    <td>- scipy</td>
+    <td>astropy</td>
+    <td>scipy</td>
  </tr>
  <tr>
-    <td>- skimage</td>
-    <td>- cmasher</td>
+    <td>skimage</td>
+    <td>cmasher</td>
  </tr>
 </table>
