@@ -42,4 +42,8 @@ If you use Onion in your research, please cite the github link.
     <td>skimage</td>
     <td>cmasher</td>
  </tr>
+ <tr>
+    <td>tqdm</td>
+    <td></td>
+ </tr>
 </table>
