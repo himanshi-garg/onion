@@ -5,7 +5,9 @@ Extracts altitude, velocity and temperature profiles as functions of radius for 
 
 Additionally, provides quick estimates for the position angle, systemic velocity, dynamical centre, and near side of the disc.
 
-<img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="550" height="400" align="center">
+<p align="center">
+<img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="550" height="400">
+</p>
 
 ## Installation:
 ```bash
