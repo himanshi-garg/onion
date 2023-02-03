@@ -1,11 +1,16 @@
-# ONION
-A **Surface Extraction Code** for **Planetary Discs**, based on the theoretical method outlined in **Pinte et al. 2018**.  
-Extracts **altitude (z)**, **velocity** and **intensity profiles** as functions of radius for an emitting surface.  
-Additionally provides quick estimates for **position angle (PA)**, **systemic velocity (v0)**, **dynamical centre (y0,x0)** and the **near facing side**.
+# Onion
 
 <p align="center">
-<img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="600" height="400">
+  <br/>
+  <img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="600" height="400"><br/>
+  <br>
+  A surface extraction code for planetary discs.<br/>
+  Based on the theoretical method outlined in <b>Pinte et al. 2018</b>.
+  <br/>
 </p>
+
+Extracts **altitude (z)**, **velocity (v(r,z))** and **intensity (I)** profiles as functions of radius for an emitting surface.  
+Also provides quick estimates for **position angle (PA)**, **systemic velocity (v0)**, **dynamical centre (y0,x0)** and the **near facing side**.
 
 ## Installation:
 ```bash
@@ -19,3 +24,26 @@ python3 setup.py install
 import onion as onion
 onion.extract_layers('<fits file>', inc=<source inclination>)
 ```
+
+## Citation:
+If you use Onion in your research, please cite the github link.
+
+## Requirements:
+<table border="0">
+ <tr>
+    <td>numpy</td>
+    <td>matplotlib</td>
+ </tr>
+ <tr>
+    <td>astropy</td>
+    <td>scipy</td>
+ </tr>
+ <tr>
+    <td>skimage</td>
+    <td>cmasher</td>
+ </tr>
+ <tr>
+    <td>tqdm</td>
+    <td></td>
+ </tr>
+</table>
