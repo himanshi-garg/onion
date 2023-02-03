@@ -1,9 +1,7 @@
 # ONION
-A Surface Extraction Code for Planetary Discs, based on the theoretical method outlined in Pinte et al. 2018.  
-
-Extracts altitude, velocity and temperature profiles as functions of radius for the emitting surfaces.  
-
-Additionally, provides quick estimates for the position angle, systemic velocity, dynamical centre, and near side of the disc.
+A Surface Extraction Code for Planetary Discs, based on the theoretical method outlined in Pinte et al. 2018.
+**MAIN**: Extracts altitude, velocity and temperature profiles as functions of radius for the emitting surfaces.
+**ADDITIONAL**: Provides quick estimates for the position angle, systemic velocity, dynamical centre, and near side of the disc.
 
 <p align="center">
 <img src="https://github.com/himanshi-garg/onion/blob/main/supplementary/shrek.jpg" width="600" height="400">
