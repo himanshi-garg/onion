@@ -10,7 +10,7 @@
 </p>
 
 Extracts **altitude (z)**, **velocity (v(r,z))** and **intensity (I)** profiles as functions of radius for an emitting surface.  
-Additionally provides quick estimates for **position angle (PA)**, **systemic velocity (v0)**, **dynamical centre (y0,x0)** and the **near facing side**.
+Also provides quick estimates for **position angle (PA)**, **systemic velocity (v0)**, **dynamical centre (y0,x0)** and the **near facing side**.
 
 ## Installation:
 ```bash
