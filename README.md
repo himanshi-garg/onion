@@ -22,7 +22,7 @@ python3 setup.py install
 ## Usage:
 ```bash
 import onion as onion
-onion.extract_layers('<fits file>', inc=<source inclination>)
+onion.extract_layers.EXTRACT('<fits file>', inc=<source inclination>)
 ```
 
 ## Citation:
