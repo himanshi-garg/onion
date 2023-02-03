@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.backends.backend_pdf
 import itertools
+import cv2
 
 from astropy.io import fits
 from scipy.optimize import curve_fit
@@ -97,9 +98,9 @@ class EXTRACT:
         
         cube = np.nan_to_num(self.image)
         rms = np.nanstd(cube)
+        print(f'rms [{self.iunit}] =', rms)
         self.cube = cube
         self.rms = rms
-        print(f'rms [{self.iunit}] =', rms)
 
         # systemic velocity
         line_profile = np.nansum(cube, axis=(1,2))
@@ -117,7 +118,7 @@ class EXTRACT:
         ## peak velocity
         peak_array = np.zeros([self.nx,self.ny], dtype='int')
         for i, k in tqdm(itertools.product(range(self.nx), range(self.ny)), total=self.nx*self.ny):
-            peaks, properties = _peak_finder(cube[:,i,k], width=5, height=5*rms, prominence=5*rms)
+            peaks, properties = _peak_finder(cube[:,i,k], width=5, height=3*rms, prominence=3*rms)
             if len(peaks) > 0:
                 max_peak = peaks[np.argmax(properties["peak_heights"])]
                 peak_array[i,k] = max_peak
@@ -138,7 +139,7 @@ class EXTRACT:
         M1 = np.array(np.trapz(int_component, dx=self.dv, axis=0) / M0)
         M1[M1 == 0] = None
         M1 -= vsyst
-        
+
         self.M1 = M1
         
         # center of mass        
@@ -162,9 +163,9 @@ class EXTRACT:
 
         print('TRACING LAYERS')
 
-        trms = abs(np.nansum(self.cube[0,:,:], axis=(0,1)))
+        trms = 0.1*np.nanmax(self.line_profile)
         channels = np.arange(0,self.nv,1)
-        tchans = channels[np.where(self.line_profile > 10*trms)]
+        tchans = channels[np.where(self.line_profile > trms)]
         beam = self.bmaj/self.pixelscale
 
         surfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,3], None)
@@ -312,14 +313,17 @@ class EXTRACT:
                 else:
                     continue
 
-        if np.nanmean(hslope - self.com[0]) < 0:
-            self.nearside = self.PA + 90
-            hdir = -1
+        if np.all(self.surfaces == None):
+            self.nearside = None
         else:
-            self.nearside = self.PA - 90
-            hdir = 1
+            if np.nanmean(hslope - self.com[0]) < 0:
+                self.nearside = self.PA + 90
+                hdir = -1
+            else:
+                self.nearside = self.PA - 90
+                hdir = 1
 
-        self.nearside += 360 if self.nearside < -90 else -360 if self.nearside > 270 else 0
+            self.nearside += 360 if self.nearside < -90 else -360 if self.nearside > 270 else 0
 
         sR = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
         sH = np.full([self.nv,2*(self.Rout+1).astype(np.int),2], None)
@@ -447,10 +451,13 @@ class EXTRACT:
                 minor_axis = [self.com[1]-(0.4*self.nx*np.cos(np.radians(self.PA))), self.com[1]+(0.4*self.nx*np.cos(np.radians(self.PA))),
                               self.com[0]-(0.4*self.ny*np.sin(np.radians(self.PA))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.PA)))]
                 ax.plot((major_axis[0],major_axis[1]),(major_axis[2],major_axis[3]), color='black', linestyle='--', linewidth=0.5, label=f'PA = {self.PA:.3f}$^\circ$')
-                ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'nearside = {self.nearside:.3f}$^\circ$')
-                near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
-                rot = self.nearside-180 if self.nearside > 90 else self.nearside
-                ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
+                if self.nearside is not None:
+                    near = [self.com[1]+(0.4*self.nx*np.cos(np.radians(self.nearside+90))), self.com[0]+(0.4*self.ny*np.sin(np.radians(self.nearside+90)))]
+                    ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label=f'nearside = {self.nearside:.3f}$^\circ$')
+                    rot = self.nearside-180 if self.nearside > 90 else self.nearside
+                    ax.annotate('near', xy=(near[0],near[1]), fontsize=8, color='black', rotation=rot)
+                else:
+                    ax.plot((minor_axis[0],minor_axis[1]),(minor_axis[2],minor_axis[3]), color='darkgray', linestyle='--', linewidth=0.5, label='minor axis')
                 ax.legend(loc='best', fontsize=7, framealpha=1.0)
             
             pdf.savefig(fig, bbox_inches='tight')
@@ -460,7 +467,7 @@ class EXTRACT:
 
         print('PLOTTING SURFACE TRACES')
 
-        if np.any(self.surfaces[:,:,:,:]):
+        if np.any(self.surfaces):
 
             pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
             
@@ -667,11 +674,13 @@ def _center_of_mass(img, beam=None):
     img_gray[img_gray != 0] = 1
     footprint = morphology.disk(beam)
     res = morphology.white_tophat(img_gray, footprint)
-    imgp = img.copy()
-    imgp[res == 1] = None
+    imgp0 = img.copy()
+    imgp0[res == 1] = None
 
-    abs_imgp = abs(imgp)
+    imgp = ndimage.median_filter(np.nan_to_num(imgp0), int(beam))
     
+    abs_imgp = abs(imgp)
+    '''
     normalizer = np.nansum(abs_imgp)
     grids = np.ogrid[[slice(0, i) for i in abs_imgp.shape]]
 
@@ -685,24 +694,26 @@ def _center_of_mass(img, beam=None):
 
     x_coord = centre_of_mass[1]
     y_coord = centre_of_mass[0]
-
+    
     y,x = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
     radius = np.hypot(y-y_coord,x-x_coord)
     mask = (radius <= (5*beam))
     
     masked_img = np.nan_to_num(abs_imgp.copy())
     masked_img[~mask] = None
+    '''
+    masked_img = abs_imgp.copy()
 
     dx = ndimage.sobel(masked_img, axis=0, mode='nearest')
     dy = ndimage.sobel(masked_img, axis=1, mode='nearest')
     grad_img = np.hypot(dy,dx)
 
-    kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
+    kernel = np.array(np.ones([int(3*beam),int(3*beam)])/np.square(int(3*beam)))
     grad_imgc = ndimage.convolve(grad_img, kernel)
    
     y_coord, x_coord = np.unravel_index(np.nanargmax(grad_imgc), grad_imgc.shape)
     
-    return [y_coord,x_coord], imgp
+    return [y_coord,x_coord], imgp0
 
         
 def _position_angle(img, cx=None, cy=None, beam=None):
@@ -716,7 +727,8 @@ def _position_angle(img, cx=None, cy=None, beam=None):
     phi[phi > np.pi] -= 2*np.pi
     
     rad = np.arange(1, Rout.astype(np.int), 1)
-    polar = warp_polar(img, center=(cy,cx), radius=Rout)
+    img0 = ndimage.median_filter(np.nan_to_num(img), int(beam))
+    polar = warp_polar(img0, center=(cy,cx), radius=Rout)
     
     semimajor = []
     
