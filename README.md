@@ -10,7 +10,7 @@ Additionally provides quick estimates for **position angle (PA)**, **systemic ve
 ## Installation:
 ```bash
 git clone https://github.com/himanshi-garg/onion.git
-cd onion
+onion
 python3 setup.py install
 ```
 
