@@ -2,30 +2,24 @@ import os
 import sys
 
 import numpy as np
-import numpy_indexed as npi
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.backends.backend_pdf
 import itertools
-import math
 
 from astropy.io import fits
 from scipy.optimize import curve_fit
-from scipy.signal import find_peaks
 from scipy import stats
 from scipy import signal
-from tqdm import tqdm
 from scipy import ndimage
-from skimage.measure import regionprops
+from tqdm import tqdm
 from skimage import color, morphology
+from skimage.transform import warp_polar
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
 from matplotlib.patches import Ellipse
-from skimage.transform import warp_polar
-from scipy.stats import binned_statistic, linregress
-from scipy.signal import savgol_filter
 
 import matplotlib.cm as cm
 import cmasher as cmr
@@ -58,7 +52,6 @@ class EXTRACT:
         hdu = fits.open(self.filename)
 
         # header
-        #print(repr(hdu[0].header))
         self.source = hdu[0].header['OBJECT']
         
         self.nx = hdu[0].header['NAXIS1']
@@ -132,10 +125,7 @@ class EXTRACT:
         vpeak = self.velocity[peak_array]
         vpeak[vpeak == self.velocity[0]] = None
         vpeak -= vsyst
-
-        plt.imshow(vpeak, origin='lower', cmap=cm.RdBu_r)
-        plt.show()
-        sys.exit()
+        
         self.vpeak = vpeak
         '''
         ## moment 1
@@ -537,7 +527,7 @@ class EXTRACT:
                 x1, y1 = x1[idx], y1[idx]
                 win = signal.windows.hann(int(self.bmaj/self.pixelscale))
                 y1 = signal.convolve(y1, win, mode='same') / sum(win)
-                bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
+                bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
                 ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='navy', markeredgecolor='whitesmoke', markeredgewidth=0.3, label='avg. upper surface')
 
                 if k == 0:
@@ -562,7 +552,7 @@ class EXTRACT:
                 x1, y1 = x1[idx], y1[idx]
                 win = signal.windows.hann(int(self.bmaj/self.pixelscale))
                 y1 = signal.convolve(y1, win, mode='same') / sum(win)
-                bins, _, _ = binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
+                bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
                 ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='darkorange', markeredgecolor='gold', markeredgewidth=0.3, label='avg. lower surface') 
 
                 if k == 0:
@@ -603,7 +593,7 @@ def _rotate_disc(channel, angle=None, cx=None, cy=None):
 
 def _peak_finder(profile, height=None, threshold=None, distance=None, prominence=None, width=None):
 
-    peaks, properties = find_peaks(profile, height=height, threshold=threshold, distance=distance, prominence=prominence, width=width)
+    peaks, properties = signal.find_peaks(profile, height=height, threshold=threshold, distance=distance, prominence=prominence, width=width)
     
     return peaks, properties
 
@@ -614,19 +604,6 @@ def _pol2cart(radius, angle, cx=None, cy=None):
     y = radius * np.sin(angle) + cy
     
     return [y,x]
-
-
-def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
-
-    channels = np.arange(0,nchans,1)
-    p0 = [np.nanmax(profile), nchans/2, np.nanstd(profile)]
-    coeff, var_matrix = curve_fit(gauss, channels, profile, p0=p0)
-    gauss_fit = gauss(channels, *coeff)
-
-    vsyst_idx = channels[np.argmax(gauss_fit)]
-    vsyst = v0 + (dv * vsyst_idx)
-
-    return vsyst, vsyst_idx, gauss_fit
     
 
 def gauss(x, *p):
@@ -646,12 +623,32 @@ def double_gauss(x, *p):
     return gaus1 + gaus2
 
 
+def sine_func(x, *p):
+
+    a, b, c = p
+    
+    return a * np.sin(b * x + c)
+
+
 def tapered_powerlaw(r, *p):
 
     z0, q, r_taper, q_taper = p
     r0 = 1.0
 
     return (z0 * (r / r0)**q) * np.exp(-(r / r_taper)**q_taper)
+
+
+def _systemic_velocity(profile, nchans=None, v0=None, dv=None):
+
+    channels = np.arange(0,nchans,1)
+    p0 = [np.nanmax(profile), nchans/2, np.nanstd(profile)]
+    coeff, var_matrix = curve_fit(gauss, channels, profile, p0=p0)
+    gauss_fit = gauss(channels, *coeff)
+
+    vsyst_idx = channels[np.argmax(gauss_fit)]
+    vsyst = v0 + (dv * vsyst_idx)
+
+    return vsyst, vsyst_idx, gauss_fit
 
 
 def _center_of_mass(img, beam=None):
@@ -697,13 +694,6 @@ def _center_of_mass(img, beam=None):
     
     return [y_coord,x_coord], imgp
 
-
-def sine_func(x, *p):
-
-    a, b, c = p
-    
-    return a * np.sin(b * x + c)
-
         
 def _position_angle(img, cx=None, cy=None, beam=None):
     
@@ -732,7 +722,7 @@ def _position_angle(img, cx=None, cy=None, beam=None):
             fillers = np.interp(phi_idx.astype(float), phi[annuli != 0.], annuli[annuli != 0.])
             annuli[phi_idx] = fillers
 
-        smoothed = savgol_filter(annuli, window_length=11, polyorder=2, mode='interp')
+        smoothed = signal.savgol_filter(annuli, window_length=11, polyorder=2, mode='interp')
         residuals = annuli - smoothed
         ss_res = np.sum(np.square(residuals))
         ss_tot = np.sum(np.square(annuli-np.mean(annuli)))
