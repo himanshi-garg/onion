@@ -9,7 +9,7 @@
   <br/>
 </p>
 
-Extracts **altitude (z)**, **velocity** and **intensity profiles** as functions of radius for an emitting surface.  
+Extracts **altitude (z)**, **velocity (v(r,z))** and **intensity (Int) / brightness temperature (Tb)** profiles as functions of radius for an emitting surface.  
 Additionally provides quick estimates for **position angle (PA)**, **systemic velocity (v0)**, **dynamical centre (y0,x0)** and the **near facing side**.
 
 ## Installation:
