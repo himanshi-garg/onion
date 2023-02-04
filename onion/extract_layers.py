@@ -705,8 +705,11 @@ def _center_of_mass(img, beam=None):
     dx = ndimage.sobel(masked_img, axis=0, mode='nearest')
     dy = ndimage.sobel(masked_img, axis=1, mode='nearest')
     grad_img = np.hypot(dy,dx)
-
-    kernel = np.array(np.ones([int(3*beam),int(3*beam)])/np.square(int(3*beam)))
+    
+    if np.any(np.isnan(img[mask])):
+        kernel = np.array(np.ones([int(3*beam),int(3*beam)])/np.square(int(3*beam)))
+    else:
+        kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
     grad_imgc = ndimage.convolve(grad_img, kernel)
    
     y_coord, x_coord = np.unravel_index(np.nanargmax(grad_imgc), grad_imgc.shape)
