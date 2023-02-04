@@ -33,13 +33,13 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 class EXTRACT:
 
-    def __init__(self, fits_file, distance=None, sigma=None, cx=None, cy=None, inc=None):        
+    def __init__(self, fits_file, distance=None, cx=None, cy=None, inc=None, PA=None):        
 
         self.inc = inc
         self.distance = distance
         
         self._fits_info(fits_file)
-        self._compute_geometric_parameters()
+        self._compute_geometric_parameters(cx=cx, cy=cy, PA=PA)
         self._trace_surface()
         self._extract_surface()
         self._plots()
@@ -92,9 +92,9 @@ class EXTRACT:
         hdu.close()
         
         
-    def _compute_geometric_parameters(self):
+    def _compute_geometric_parameters(self, cx=None, cy=None, PA=None):
         
-        print('GETTING GEOMETRIC PROPERTIES')
+        print('EXTRACTING GEOMETRIC PROPERTIES')
         
         cube = np.nan_to_num(self.image)
         rms = np.nanstd(cube)
@@ -146,6 +146,8 @@ class EXTRACT:
         vmap = self.M1.copy()
         beam_pix = self.bmaj/self.pixelscale
         com, M1p = _center_of_mass(vmap, beam=beam_pix)
+        if cx is not None and cy is not None:
+            com = [cy.astype(float), cx.astype(float)]
         print('center coordinates (pixels) =', com)
 
         self.com = com
@@ -153,6 +155,8 @@ class EXTRACT:
 
         # position angle
         PA, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
+        if PA is not None:
+            PA = PA.astype(float)
         print('position angle (degrees) =', PA)
 
         self.PA = PA
@@ -525,9 +529,16 @@ class EXTRACT:
 
             self.sH[np.where(self.sH != None)] *= self.pixelscale
             self.sR[np.where(self.sR != None)] *= self.pixelscale
-        
-            surfs = {0: self.sH, 1: self.sV, 2: self.sI}
             ylabels = ['z [arcsec]', 'v [m/s]', f'flux [{self.iunit}]']
+            xlabel = ['r [arcsec]']
+
+            if self.distance is not None:
+                self.sH *= self.distance
+                self.sR *= self.distance
+                ylabels[0] = ['z [au]']
+                xlabel = ['r [au]']
+        
+            surfs = {0: self.sH, 1: self.sV, 2: self.sI}            
         
             pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_profiles.pdf')
             for k in tqdm(range(3)):
@@ -584,7 +595,7 @@ class EXTRACT:
                             pass
 
                 ylims = (np.nanmin(surfs[k][surfs[k] != None]),np.nanpercentile(surfs[k][np.isfinite(surfs[k].astype(float))].astype(float),[99.7])) if k == 1 else None
-                ax.set(xlabel='r [arcsec]', ylabel=ylabels[k], ylim=ylims)
+                ax.set(xlabel=xlabel[0], ylabel=ylabels[k], ylim=ylims)
                 ax.legend(loc='best', fontsize=6, markerscale=1.5)
             
                 pdf.savefig(fig, bbox_inches='tight')
