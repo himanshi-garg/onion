@@ -54,6 +54,7 @@ class EXTRACT:
 
         # header
         self.source = hdu[0].header['OBJECT']
+        print('OBJECT =', self.source)
         
         self.nx = hdu[0].header['NAXIS1']
         self.ny = hdu[0].header['NAXIS2']
