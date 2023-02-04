@@ -681,26 +681,7 @@ def _center_of_mass(img, beam=None):
     
     abs_imgp = abs(imgp)
     
-    normalizer = np.nansum(abs_imgp)
-    grids = np.ogrid[[slice(0, i) for i in abs_imgp.shape]]
-
-    results = [np.nansum(abs_imgp * grids[dir].astype(float)) / normalizer
-               for dir in range(abs_imgp.ndim)]
-
-    if np.isscalar(results[0]):
-        centre_of_mass = tuple(results)
-    else:
-        centre_of_mass = [tuple(v) for v in np.array(results).T]
-
-    x_coord = centre_of_mass[1]
-    y_coord = centre_of_mass[0]
-    
-    y,x = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
-    radius = np.hypot(y-y_coord,x-x_coord)
-    mask = (radius <= (10*beam))
-    
     masked_img = abs_imgp.copy()
-    masked_img[~mask] = None
 
     dx = ndimage.sobel(masked_img, axis=0, mode='nearest')
     dy = ndimage.sobel(masked_img, axis=1, mode='nearest')
