@@ -486,11 +486,11 @@ class EXTRACT:
                 #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
                 #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
             
-                ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='blueviolet', label='upper surface')
-                ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='blueviolet')
+                ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='orange', label='upper surface')
+                ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='orange')
                 ax.plot(self.surfaces[i,:,2,1], self.surfaces[i,:,2,0], '.', markersize=2, color='crimson', label='lower surface')
                 ax.plot(self.surfaces[i,:,3,1], self.surfaces[i,:,3,0], '.', markersize=2, color='crimson')
-                ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='lavender', label='mid upper surface')
+                ax.plot(self.mid[i,:,0,1], self.mid[i,:,0,0], '.', markersize=2, color='moccasin', label='mid upper surface')
                 ax.plot(self.mid[i,:,1,1], self.mid[i,:,1,0], '.', markersize=2, color='pink', label='mid lower surface')
                 ax.legend(loc='upper right', fontsize=7, markerscale=2)
                 bounds = self.Rout*1.1
