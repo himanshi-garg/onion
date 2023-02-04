@@ -680,7 +680,7 @@ def _center_of_mass(img, beam=None):
     imgp = ndimage.median_filter(np.nan_to_num(imgp0), int(beam))
     
     abs_imgp = abs(imgp)
-
+    
     normalizer = np.nansum(abs_imgp)
     grids = np.ogrid[[slice(0, i) for i in abs_imgp.shape]]
 
@@ -699,7 +699,7 @@ def _center_of_mass(img, beam=None):
     radius = np.hypot(y-y_coord,x-x_coord)
     mask = (radius <= (10*beam))
     
-    masked_img = abs_imgp.copy()
+    masked_img = np.nan_to_num(abs_imgp.copy())
     masked_img[~mask] = None
 
     dx = ndimage.sobel(masked_img, axis=0, mode='nearest')
