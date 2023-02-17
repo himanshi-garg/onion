@@ -24,7 +24,7 @@ python3 setup.py install
 import onion as onion
 onion.EXTRACT('<fits file>', inc=<source inclination in degrees>, distance=<source distance in parsecs>)
 ```
-distance is only required for radius and height measurements in [au], else the default ["] units are used.
+distance is only required for radius (r) and altitude (z) measurements in [au], else the default ["] units are used.
 
 ## Citation:
 If you use Onion in your research, please cite the github link.
