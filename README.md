@@ -22,8 +22,9 @@ python3 setup.py install
 ## Usage:
 ```bash
 import onion as onion
-onion.EXTRACT('<fits file>', inc=<source inclination>)
+onion.EXTRACT('<fits file>', inc=<source inclination in degrees>, distance=<source distance in parsecs>)
 ```
+distance is only required for radius and height measurements in [au], else the default ["] units are used.
 
 ## Citation:
 If you use Onion in your research, please cite the github link.
