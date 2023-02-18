@@ -21,6 +21,7 @@ from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import ticker
 from matplotlib.patches import Ellipse
+from scipy import interpolate
 
 import matplotlib.cm as cm
 import cmasher as cmr
@@ -28,6 +29,7 @@ import cmasher as cmr
 np.set_printoptions(threshold=np.inf)
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
+#warnings.filterwarnings("ignore", category=OptimizeWarning)
 
 ###################################################################################################
 
@@ -35,7 +37,10 @@ class EXTRACT:
 
     def __init__(self, fits_file, distance=None, cx=None, cy=None, inc=None, PA=None):        
 
-        self.inc = inc
+        if inc == None:
+            raise ValueError("Need to specify source inclination [degrees]:")
+        else:
+            self.inc = inc
         self.distance = distance
         
         self._fits_info(fits_file)
@@ -114,22 +119,6 @@ class EXTRACT:
         self.line_profile = line_profile
         self.gauss_fit = gauss_fit
         
-        # velocity map
-        '''
-        ## peak velocity
-        peak_array = np.zeros([self.nx,self.ny], dtype='int')
-        for i, k in tqdm(itertools.product(range(self.nx), range(self.ny)), total=self.nx*self.ny):
-            peaks, properties = _peak_finder(cube[:,i,k], width=5, height=3*rms, prominence=3*rms)
-            if len(peaks) > 0:
-                max_peak = peaks[np.argmax(properties["peak_heights"])]
-                peak_array[i,k] = max_peak
-                
-        vpeak = self.velocity[peak_array]
-        vpeak[vpeak == self.velocity[0]] = None
-        vpeak -= vsyst
-        
-        self.vpeak = vpeak
-        '''
         ## moment 1
         threshold_cube = cube.copy()
         threshold_cube[cube < 2*rms] = None
@@ -142,6 +131,7 @@ class EXTRACT:
         M1 -= vsyst
 
         self.M1 = M1
+        self.M0 = M0
         
         # center of mass        
         vmap = self.M1.copy()
@@ -173,8 +163,8 @@ class EXTRACT:
         tchans = channels[np.where(self.line_profile > trms)]
         beam = self.bmaj/self.pixelscale
 
-        surfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,3], None)
-        rsurfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,3], None)
+        surfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,4], None)
+        rsurfaces = np.full([self.nv,(self.Rout+1).astype(np.int),4,4], None)
 
         phi = np.deg2rad(np.arange(0,360,1))
         phi[phi > np.pi] -= 2*np.pi
@@ -206,10 +196,10 @@ class EXTRACT:
                     up1 = _pol2cart(k, phi0, cx=self.com[1], cy=self.com[0])
                     up2 = _pol2cart(k, phi1, cx=self.com[1], cy=self.com[0])
                     
-                    surfaces[i,k,0,:] = np.concatenate((up1,[phi0]))
-                    surfaces[i,k,1,:] = np.concatenate((up2,[phi1]))
-                    rsurfaces[i,k,0,:] = np.concatenate((up1,[phi0]))
-                    rsurfaces[i,k,1,:] = np.concatenate((up2,[phi1]))
+                    surfaces[i,k,0,:] = np.concatenate((up1,[phi0],[k.astype(float)]))
+                    surfaces[i,k,1,:] = np.concatenate((up2,[phi1],[k.astype(float)]))
+                    rsurfaces[i,k,0,:] = np.concatenate((up1,[phi0],[k.astype(float)]))
+                    rsurfaces[i,k,1,:] = np.concatenate((up2,[phi1],[k.astype(float)]))
                     
                 if len(sorted_peaks) >= 4:
                     if np.all(phi[sorted_peaks[2:4]] > np.pi/2) or np.all(phi[sorted_peaks[2:4]] < -np.pi/2):
@@ -221,46 +211,76 @@ class EXTRACT:
                     lo1 = _pol2cart(k, phi2, cx=self.com[1], cy=self.com[0])
                     lo2 = _pol2cart(k, phi3, cx=self.com[1], cy=self.com[0])
                     
-                    surfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
-                    surfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
-                    rsurfaces[i,k,2,:] = np.concatenate((lo1,[phi2]))
-                    rsurfaces[i,k,3,:] = np.concatenate((lo2,[phi3]))
+                    surfaces[i,k,2,:] = np.concatenate((lo1,[phi2],[k.astype(float)]))
+                    surfaces[i,k,3,:] = np.concatenate((lo2,[phi3],[k.astype(float)]))
+                    rsurfaces[i,k,2,:] = np.concatenate((lo1,[phi2],[k.astype(float)]))
+                    rsurfaces[i,k,3,:] = np.concatenate((lo2,[phi3],[k.astype(float)]))
 
             grad0 = np.full([4], None)
+            cav = np.full([4,len(surfaces[i,:,0,3])], False)
+            dr = np.full([4,len(surfaces[i,:,0,3])], None)
             
             for vx in range(4):
                 if surfaces[i,:,vx,:].any():
 
                     layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
                     layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
+                    layerr = np.hstack((0.,surfaces[i,:,vx,3][np.where(surfaces[i,:,vx,3] != None)]))
 
                     ggrad = np.full([len(layery)], 1.)
-                    gvol_factor = np.full([len(layery)], 1.)
+                    ggrad[0] = abs(-self.com[1] / self.com[0])
+                    gvol_factor = np.full([len(layery)], 0.)
                     
                     for lx in range(1, len(layery)):
+                        rs = abs(layerr[lx] - layerr[lx-1]) 
                         ggrad[lx] = abs(-layerx[lx] / layery[lx])
-                        gvol_factor[lx] = (ggrad[lx] / ggrad[lx-1])
+                        gvol_factor[lx] = abs(np.exp(abs(np.log(ggrad[lx] / ggrad[lx-1]))) - 1)
+                        
+                        gap = True if lx == 1 else False
+                        if rs > 1 and lx > 1:
+                            Int_gap = polar[:,[int(layerr[lx-1]+1), int(layerr[lx])]]
+                            Int_gapf = Int_gap[np.where(Int_gap > 3*self.rms)]
+                            if len(Int_gapf) == 0:
+                                gap = True
+                            else:
+                                avg_Int = np.mean(Int_gapf) / self.rms
+                                dx = layerx[lx] - layerx[lx-1]
+                                dy = layery[lx] - layery[lx-1]
+                                sep = np.hypot(dx,dy)
+                                fac = abs(sep - rs)
+                                gap = True if (avg_Int < 5 and fac < 5) else False
 
-                    gvol = stats.iqr(gvol_factor[2:])
+                        gvol_factor[lx] /= rs if gap == True else 1
+                        cav[vx,int(layerr[lx])] = gap
+                        dr[vx,int(layerr[lx])] = rs
+                        
+                    gvol_median = np.median(gvol_factor[2:])
+                    Q1 = np.nanpercentile(gvol_factor[2:], [16])
+                    Q3 = np.nanpercentile(gvol_factor[2:], [84])
+                    if Q1 == None or Q3 == None:
+                        iqr = stats.iqr(gvol_factor[2:])
+                    else:
+                        iqr = Q3[0]-Q1[0]
                     std = np.std(gvol_factor[2:])
-                    factor = std / gvol
-                    threshold = 2*np.sqrt(factor)*gvol
-                            
+                    threshold = 3 * np.sqrt(std/iqr) * iqr
+                    
                     for k in rad:
                         if surfaces[i,k,vx,:].all():
-                            
+
                             grad = abs(-surfaces[i,k,vx,1] / surfaces[i,k,vx,0])
-                            
+
                             if grad0[vx] is None:
                                 grad0[vx] = grad
                             else:
-                                vol_factor = (grad / grad0[vx])
-                                vol = np.std([vol_factor, np.median(gvol_factor)])
-                                if vol > threshold:
+                                vol_factor = abs(np.exp(abs(np.log((grad / grad0[vx])))) - 1)
+                                vol_factor /= dr[vx,k] if cav[vx,k] == True else 1
+                                vol = (vol_factor - gvol_median) / threshold
+                                
+                                if vol > 1 and vol_factor > 0.01:
                                     surfaces[i,k,vx,:] = None
                                 else:
                                     grad0[vx] = grad
-                                    
+                                             
             for k in rad:
                 if np.any(surfaces[i,k,:2,:] == None):
                     surfaces[i,k,:2,:] = None
@@ -469,12 +489,12 @@ class EXTRACT:
             plt.close(fig)
         pdf.close()
         
-
+        
         print('PLOTTING SURFACE TRACES')
 
         if np.any(self.surfaces):
 
-            pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
+            pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_v0.pdf')
             
             for i in tqdm(self.tchans, total=len(self.tchans)):
                 fig, ax = plt.subplots(figsize=(6,6))
@@ -486,10 +506,10 @@ class EXTRACT:
                 ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
                 ax.set(xlabel='pixels', ylabel='pixels')
 
-                #ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
-                #ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
-                #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
-                #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
+                ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
+                ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
+                ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
+                ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
             
                 ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='darkorange', label='upper surface')
                 ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='darkorange')
@@ -690,6 +710,7 @@ def _center_of_mass(img, beam=None):
     imgp0[res == 1] = None
 
     imgp = ndimage.median_filter(np.nan_to_num(imgp0), int(beam))
+    imgp[imgp == 0.] = None
     
     abs_imgp = abs(imgp)
     
@@ -704,29 +725,37 @@ def _center_of_mass(img, beam=None):
     else:
         centre_of_mass = [tuple(v) for v in np.array(results).T]
 
-    x_coord = centre_of_mass[1]
-    y_coord = centre_of_mass[0]
+    x_coord0 = centre_of_mass[1]
+    y_coord0 = centre_of_mass[0]
+
+    x,y = np.meshgrid(np.arange(imgp.shape[1]) - x_coord0, np.arange(imgp.shape[0]) - y_coord0)
+    R = np.hypot(x,y)
+    R[np.isnan(imgp)] = None
+    Rout = np.nanmax(R)
+    polar = warp_polar(imgp, center=(y_coord0,x_coord0), radius=Rout)
+    polar[:,np.where(np.isnan(polar).any(axis=0))] = None
+    rmax = (~np.isnan(polar)).cumsum(1).argmax(1)[0]
     
-    y,x = np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]))
-    radius = np.hypot(y-y_coord,x-x_coord)
-    mask = (radius <= (10*beam))
+    x,y = np.meshgrid(np.arange(img.shape[1]) - x_coord0, np.arange(img.shape[0]) - y_coord0)    
+    radius = np.hypot(x,y)
+    mask = (radius <= rmax) if rmax < 10*beam else (radius <= 10*beam)
     
     masked_img = np.nan_to_num(abs_imgp.copy())
     masked_img[~mask] = None
 
-    dx = ndimage.sobel(masked_img, axis=0, mode='nearest')
-    dy = ndimage.sobel(masked_img, axis=1, mode='nearest')
+    dx = ndimage.sobel(masked_img, axis=1, mode='nearest')
+    dy = ndimage.sobel(masked_img, axis=0, mode='nearest')
     grad_img = np.hypot(dy,dx)
-    
-    if np.any(np.isnan(img[mask])):
+
+    if len(imgp[mask].flatten()[np.isnan(imgp[mask].flatten())]) > np.square(beam)/3 and rmax > 4*beam:
         kernel = np.array(np.ones([int(3*beam),int(3*beam)])/np.square(int(3*beam)))
     else:
         kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
     grad_imgc = ndimage.convolve(grad_img, kernel)
-   
+
     y_coord, x_coord = np.unravel_index(np.nanargmax(grad_imgc), grad_imgc.shape)
-    
-    return [y_coord,x_coord], imgp0
+
+    return [y_coord,x_coord], imgp
 
         
 def _position_angle(img, cx=None, cy=None, beam=None):
