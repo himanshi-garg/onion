@@ -42,19 +42,19 @@ If you use Onion in your research, please cite the github link.
 ## Requirements:
 <table border="0">
  <tr>
-    <td>numpy</td>
-    <td>matplotlib</td>
+    <td>[numpy](https://pypi.org/project/numpy/)</td>
+    <td>[matplotlib](https://pypi.org/project/matplotlib/)</td>
  </tr>
  <tr>
-    <td>astropy</td>
-    <td>scipy</td>
+    <td>[astropy](https://pypi.org/project/astropy/)</td>
+    <td>[scipy](https://pypi.org/project/scipy/)</td>
  </tr>
  <tr>
-    <td>skimage</td>
-    <td>cmasher</td>
+    <td>[skimage](https://pypi.org/project/scikit-image/)</td>
+    <td>[cmasher](https://pypi.org/project/cmasher/)</td>
  </tr>
  <tr>
-    <td>tqdm</td>
+    <td>[tqdm](https://pypi.org/project/tqdm/)</td>
     <td></td>
  </tr>
 </table>
