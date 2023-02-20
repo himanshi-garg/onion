@@ -22,9 +22,17 @@ python3 setup.py install
 ## Usage:
 ```bash
 import onion as onion
-onion.EXTRACT('<fits file>', inc=<source inclination in degrees>, distance=<source distance in parsecs>)
+onion.EXTRACT('<fits file>', inc=<inclination [degrees]>, distance=<distance [parsecs]>)
+e.g. onion.EXTRACT('test.fits', inc=45, distance=100)
 ```
+
 distance is only required for radius (r) and altitude (z) measurements in [au], else the default ["] units are used.
+
+to apply user specified geometric parameters:
+```bash
+onion.EXTRACT('<fits file>', inc=<inclination [degrees]>, distance=<distance [parsecs]>, cx=<x centre [pixels]>, cy=<y centre [pixels>, PA=<PA [degrees]>, vsyst=<systemic velocity [m/s]>)
+e.g. onion.EXTRACT('test.fits', inc=45, distance=100, cx=150, cy=150, PA=45, vsyst=4000)
+```
 
 ## Citation:
 If you use Onion in your research, please cite the github link.
