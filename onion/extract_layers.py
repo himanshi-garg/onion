@@ -510,10 +510,10 @@ class EXTRACT:
                 ax.plot(self.com[1], self.com[0], marker='+', markersize=10, color='white')
                 ax.set(xlabel='pixels', ylabel='pixels')
 
-                ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
-                ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
-                ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
-                ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,0,1], self.rsurfaces[i,:,0,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,1,1], self.rsurfaces[i,:,1,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,2,1], self.rsurfaces[i,:,2,0], '.', markersize=2, color='cyan')
+                #ax.plot(self.rsurfaces[i,:,3,1], self.rsurfaces[i,:,3,0], '.', markersize=2, color='cyan')
             
                 ax.plot(self.surfaces[i,:,0,1], self.surfaces[i,:,0,0], '.', markersize=2, color='darkorange', label='upper surface')
                 ax.plot(self.surfaces[i,:,1,1], self.surfaces[i,:,1,0], '.', markersize=2, color='darkorange')
