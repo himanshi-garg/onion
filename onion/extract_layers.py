@@ -36,7 +36,7 @@ class EXTRACT:
     def __init__(self, fits_file, dist=None, cx=None, cy=None, inc=None, PA=None, vsyst=None):        
 
         if inc == None:
-            raise ValueError("Need to specify source inclination [degrees]:")
+            raise ValueError("Need to specify source inclination [degrees]")
         else:
             self.inc = inc
         self.dist = dist
@@ -498,7 +498,7 @@ class EXTRACT:
 
         if np.any(self.surfaces):
 
-            pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces_v0.pdf')
+            pdf = matplotlib.backends.backend_pdf.PdfPages(self.filename+'_traces.pdf')
             
             for i in tqdm(self.tchans, total=len(self.tchans)):
                 fig, ax = plt.subplots(figsize=(6,6))
