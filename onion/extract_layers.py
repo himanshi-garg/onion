@@ -226,6 +226,8 @@ class EXTRACT:
                     layerx = np.hstack((self.com[1],surfaces[i,:,vx,1][np.where(surfaces[i,:,vx,1] != None)]))
                     layery = np.hstack((self.com[0],surfaces[i,:,vx,0][np.where(surfaces[i,:,vx,0] != None)]))
                     layerr = np.hstack((0.,surfaces[i,:,vx,3][np.where(surfaces[i,:,vx,3] != None)]))
+                    if len(layerr) <= 3:
+                        continue
 
                     ggrad = np.full([len(layery)], 1.)
                     ggrad[0] = abs(-self.com[1] / self.com[0])
@@ -248,7 +250,7 @@ class EXTRACT:
                                 dy = layery[lx] - layery[lx-1]
                                 sep = np.hypot(dx,dy)
                                 fac = abs(sep - rs)
-                                gap = True if (avg_Int < 5 and fac < 5) else False
+                                #gap = True if (avg_Int < 5 and fac < 5) else False
 
                         gvol_factor[lx] /= rs if gap == True else 1
                         cav[vx,int(layerr[lx])] = gap
@@ -257,10 +259,7 @@ class EXTRACT:
                     gvol_median = np.median(gvol_factor[2:])
                     Q1 = np.nanpercentile(gvol_factor[2:], [16])
                     Q3 = np.nanpercentile(gvol_factor[2:], [84])
-                    if Q1 == None or Q3 == None:
-                        iqr = stats.iqr(gvol_factor[2:])
-                    else:
-                        iqr = Q3[0]-Q1[0]
+                    iqr = Q3[0]-Q1[0]
                     std = np.std(gvol_factor[2:])
                     threshold = 3 * np.sqrt(std/iqr) * iqr
                     
@@ -747,14 +746,17 @@ def _center_of_mass(img, beam=None):
     dy = ndimage.sobel(masked_img, axis=0, mode='nearest')
     grad_img = np.hypot(dy,dx)
 
-    if len(imgp[mask].flatten()[np.isnan(imgp[mask].flatten())]) > np.square(beam)/3 and rmax > 4*beam:
+    if len(imgp[mask].flatten()[np.isnan(imgp[mask].flatten())]) > np.square(beam)/3 and rmax >= int(3*beam):
         kernel = np.array(np.ones([int(3*beam),int(3*beam)])/np.square(int(3*beam)))
     else:
         kernel = np.array(np.ones([int(beam),int(beam)])/np.square(int(beam)))
     grad_imgc = ndimage.convolve(grad_img, kernel)
 
+    if np.all(np.isnan(grad_imgc)):
+        grad_imgc[int(y_coord0),int(x_coord0)] = 1
+        
     y_coord, x_coord = np.unravel_index(np.nanargmax(grad_imgc), grad_imgc.shape)
-
+    
     return [y_coord,x_coord], imgp
 
         
