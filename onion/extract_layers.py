@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.backends.backend_pdf
 import itertools
-import cv2
 
 from astropy.io import fits
 from scipy.optimize import curve_fit
@@ -34,13 +33,13 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 class EXTRACT:
 
-    def __init__(self, fits_file, distance=None, cx=None, cy=None, inc=None, PA=None, vsyst=None):        
+    def __init__(self, fits_file, dist=None, cx=None, cy=None, inc=None, PA=None, vsyst=None):        
 
         if inc == None:
             raise ValueError("Need to specify source inclination [degrees]:")
         else:
             self.inc = inc
-        self.distance = distance
+        self.dist = dist
         
         self._fits_info(fits_file)
         self._compute_geometric_parameters(cx=cx, cy=cy, PA=PA, vsyst=vsyst)
@@ -558,9 +557,9 @@ class EXTRACT:
             ylabels = ['z [arcsec]', 'v [m/s]', f'flux [{self.iunit}]']
             xlabel = ['r [arcsec]']
 
-            if self.distance is not None:
-                self.sH *= self.distance
-                self.sR *= self.distance
+            if self.dist is not None:
+                self.sH *= self.dist
+                self.sR *= self.dist
                 ylabels[0] = ['z [au]']
                 xlabel = ['r [au]']
         
