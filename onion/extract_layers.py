@@ -29,13 +29,12 @@ import cmasher as cmr
 np.set_printoptions(threshold=np.inf)
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-#warnings.filterwarnings("ignore", category=OptimizeWarning)
 
 ###################################################################################################
 
 class EXTRACT:
 
-    def __init__(self, fits_file, distance=None, cx=None, cy=None, inc=None, PA=None):        
+    def __init__(self, fits_file, distance=None, cx=None, cy=None, inc=None, PA=None, vsyst=None):        
 
         if inc == None:
             raise ValueError("Need to specify source inclination [degrees]:")
@@ -44,7 +43,7 @@ class EXTRACT:
         self.distance = distance
         
         self._fits_info(fits_file)
-        self._compute_geometric_parameters(cx=cx, cy=cy, PA=PA)
+        self._compute_geometric_parameters(cx=cx, cy=cy, PA=PA, vsyst=vsyst)
         self._trace_surface()
         self._extract_surface()
         self._plots()
@@ -98,7 +97,7 @@ class EXTRACT:
         hdu.close()
         
         
-    def _compute_geometric_parameters(self, cx=None, cy=None, PA=None):
+    def _compute_geometric_parameters(self, cx=None, cy=None, PA=None, vsyst=None):
         
         print('EXTRACTING GEOMETRIC PROPERTIES')
         
@@ -110,14 +109,18 @@ class EXTRACT:
 
         # systemic velocity
         line_profile = np.nansum(cube, axis=(1,2))
-        vsyst, vsyst_idx, gauss_fit = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
+        if vsyst is not None:
+            vsyst, vsyst_idx = vsyst, (vsyst - self.velocity[0])/self.dv
+            self.gauss_fit = None
+        else:
+            vsyst, vsyst_idx, gauss_fit = _systemic_velocity(line_profile, nchans=self.nv, v0=self.velocity[0], dv=self.dv)
+            self.gauss_fit = gauss_fit
         
         print('systemic velocity (m/s) =', vsyst)
         
         self.vsyst = vsyst
         self.vsyst_idx = vsyst_idx
         self.line_profile = line_profile
-        self.gauss_fit = gauss_fit
         
         ## moment 1
         threshold_cube = cube.copy()
@@ -131,7 +134,6 @@ class EXTRACT:
         M1 -= vsyst
 
         self.M1 = M1
-        self.M0 = M0
         
         # center of mass        
         vmap = self.M1.copy()
@@ -145,9 +147,12 @@ class EXTRACT:
         self.M1p = M1p
 
         # position angle
-        PA, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
         if PA is not None:
             PA = PA.astype(float)
+            _, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
+        else:
+            PA, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
+            
         print('position angle (degrees) =', PA)
 
         self.PA = PA
@@ -250,7 +255,7 @@ class EXTRACT:
                                 dy = layery[lx] - layery[lx-1]
                                 sep = np.hypot(dx,dy)
                                 fac = abs(sep - rs)
-                                #gap = True if (avg_Int < 5 and fac < 5) else False
+                                gap = True if (avg_Int < 5 and fac < 5) else False
 
                         gvol_factor[lx] /= rs if gap == True else 1
                         cav[vx,int(layerr[lx])] = gap
@@ -421,7 +426,8 @@ class EXTRACT:
             if i == 0:
                 # line profile for systemic velocity
                 ax.plot(self.line_profile, color='black', linewidth=1.0)
-                ax.plot(self.gauss_fit, color='firebrick', linestyle='--', linewidth=1.0)
+                if self.gauss_fit is not None:
+                    ax.plot(self.gauss_fit, color='firebrick', linestyle='--', linewidth=1.0)
                 ax.plot(self.vsyst_idx, self.line_profile[self.vsyst_idx], '.', markersize=10, color='firebrick', label=f'vlsr = {self.vsyst:.3f} m/s')
                 ax.legend(loc='upper right', fontsize=7)
                 ax.set(xlabel = 'channel number', ylabel = f'$\Sigma$Flux [{self.iunit}]', title='systemic velocity')
@@ -582,7 +588,7 @@ class EXTRACT:
                             z0 = z[np.nanargmin(abs(r - 1.0))]
                             q, r_taper, q_taper = 1.0, 2.0, 1.0
                             p0 = [z0, q, r_taper, q_taper]
-                            coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
+                            coeff, _ = curve_fit(tapered_powerlaw, r, z, p0=p0)
                             tpl_fit = tapered_powerlaw(r, *coeff)
                             ax.plot(r, tpl_fit, '-', color='navy', linewidth=1.0,
                                     label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
@@ -607,7 +613,7 @@ class EXTRACT:
                             z0 = z[np.argmin(abs(r - 1.0))]
                             q, r_taper, q_taper = 1.0, 2.0, 1.0
                             p0 = [z0, q, r_taper, q_taper]
-                            coeff, var_matrix = curve_fit(tapered_powerlaw, r, z, p0=p0)
+                            coeff, _ = curve_fit(tapered_powerlaw, r, z, p0=p0)
                             tpl_fit = tapered_powerlaw(r, *coeff)
                             ax.plot(r, tpl_fit, '-', color='darkorange', linewidth=1.0,
                                     label=f'tapered power law parameters: \n z0={coeff[0]:.2f}, q={coeff[1]:.2f}, r_tap={coeff[2]:.2f}, q_tap={coeff[3]:.2f}')
