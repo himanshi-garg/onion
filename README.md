@@ -30,7 +30,10 @@ distance is only required for radius (r) and altitude (z) measurements in [au], 
 
 to apply user specified geometric parameters:
 ```bash
-onion.EXTRACT('<fits file>', inc=<inclination [degrees]>, distance=<distance [parsecs]>, cx=<x centre [pixels]>, cy=<y centre [pixels>, PA=<PA [degrees]>, vsyst=<systemic velocity [m/s]>)
+onion.EXTRACT('<fits file>', inc=<inclination [degrees]>, distance=<distance [parsecs]>, 
+<br/>
+cx=<x centre [pixels]>, cy=<y centre [pixels>, PA=<PA [degrees]>, vsyst=<systemic velocity [m/s]>)
+<br>
 e.g. onion.EXTRACT('test.fits', inc=45, distance=100, cx=150, cy=150, PA=45, vsyst=4000)
 ```
 
