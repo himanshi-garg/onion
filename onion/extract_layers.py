@@ -33,16 +33,22 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 class EXTRACT:
 
-    def __init__(self, fits_file, dist=None, cx=None, cy=None, inc=None, PA=None, vsyst=None):        
+    def __init__(self, fits_file, dist=None, cx=None, cy=None, com_unit=None, inc=None, PA=None, vsyst=None):        
 
         if inc == None:
             raise ValueError("Need to specify source inclination [degrees]")
         else:
             self.inc = inc
+
+        if cx is not None and cy is not None:
+            if com_unit is None:
+                raise ValueError("Need to specify units for centre of mass coordinates, either 'arcseconds' or 'pixels'")
+            
+        self.com_unit = com_unit
         self.dist = dist
         
         self._fits_info(fits_file)
-        self._compute_geometric_parameters(cx=cx, cy=cy, PA=PA, vsyst=vsyst)
+        self._compute_geometric_parameters(cx=cx, cy=cy, com_unit=com_unit, PA=PA, vsyst=vsyst)
         self._trace_surface()
         self._extract_surface()
         self._plots()
@@ -96,7 +102,7 @@ class EXTRACT:
         hdu.close()
         
         
-    def _compute_geometric_parameters(self, cx=None, cy=None, PA=None, vsyst=None):
+    def _compute_geometric_parameters(self, cx=None, cy=None, com_unit=None, PA=None, vsyst=None):
         
         print('EXTRACTING GEOMETRIC PROPERTIES')
         
@@ -138,8 +144,22 @@ class EXTRACT:
         vmap = self.M1.copy()
         beam_pix = self.bmaj/self.pixelscale
         com, M1p = _center_of_mass(vmap, beam=beam_pix)
-        if cx is not None and cy is not None:
-            com = [cy.astype(float), cx.astype(float)]
+        if cx is not None and cy is not None and com_unit is not None:
+            if com_unit == 'pixels':
+                com_img = np.zeros([int(2*cy),int(2*cx)])
+                com_img[int(cy),int(cx)] = 1
+                cy, cx = np.unravel_index(np.nanargmax(com_img), com_img.shape)
+                com = [cy, cx]
+            elif com_unit == 'arcseconds':
+                cy = int(float(cy)/self.pixelscale + self.imgcy)
+                cx = int(float(cx)/self.pixelscale + self.imgcx)
+                com_img = np.zeros([2*cy,2*cx])
+                com_img[cy,cx] = 1
+                cy, cx = np.unravel_index(np.nanargmax(com_img), com_img.shape)
+                com = [cy, cx]
+            else:
+                raise ValueError("centre of mass units need to be either 'arcseconds' or 'pixels'")
+
         print('center coordinates (pixels) =', com)
 
         self.com = com
@@ -147,7 +167,7 @@ class EXTRACT:
 
         # position angle
         if PA is not None:
-            PA = PA.astype(float)
+            PA = float(PA)
             _, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
         else:
             PA, Rout = _position_angle(self.M1p, cx=self.com[1], cy=self.com[0], beam=beam_pix)
@@ -579,6 +599,14 @@ class EXTRACT:
                     y1 = signal.convolve(y1, win, mode='same') / sum(win)
                     bins, _, _ = stats.binned_statistic(x1.astype(float),[x1.astype(float),y1.astype(float)], bins=np.round(self.Rout))
                     ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='navy', markeredgecolor='whitesmoke', markeredgewidth=0.3, label='avg. upper surface')
+
+                    if k == 0:
+                        with open(self.filename+'_traces_original.csv', 'w') as f:
+                            output_traces = np.column_stack((self.sR[:,:,0].flatten().tolist(), self.sH[:,:,0].flatten().tolist()))
+                            np.savetxt(f, output_traces, header='r, z', fmt='%s')
+                        with open(self.filename+'_traces_binned.csv', 'w') as f:
+                            output_traces = np.column_stack((bins[0,:].tolist(), bins[1,:].tolist()))
+                            np.savetxt(f, output_traces, header='binned_r, binned_z', fmt='%s')
 
                     if k == 0:
                         try:
