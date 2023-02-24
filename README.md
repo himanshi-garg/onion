@@ -31,7 +31,7 @@ distance is only required for radius (r) and altitude (z) measurements in [au], 
 to apply user specified geometric parameters:
 ```bash
 onion.EXTRACT('fits file', inc=inclination [degrees], dist=distance [parsecs],
-              cx=centre_x [pixels], cy=centre_y [pixels], com_units=units for centre of mass [either 'arcseconds' or 'pixels], 
+              cx=centre_x [pixels], cy=centre_y [pixels], com_units=units for centre of mass [either 'arcseconds' or 'pixels'], 
               PA=position angle [degrees], vsyst=systemic velocity [m/s])
 e.g. onion.EXTRACT('test.fits', inc=45, distance=100, cx=150, cy=150, com_units='arcseconds', PA=45, vsyst=4000)
 ```
