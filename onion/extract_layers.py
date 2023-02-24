@@ -149,12 +149,12 @@ class EXTRACT:
         if cx is not None and cy is not None and self.com_unit is not None:
             if self.com_unit == 'pixels':
                 com_img = np.zeros([int(2*cy),int(2*cx)])
-                com_img[int(cy),int(cx)] = 1
+                com_img[int(cy-1),int(cx-1)] = 1
                 cy, cx = np.unravel_index(np.nanargmax(com_img), com_img.shape)
                 com = [cy, cx]
             elif self.com_unit == 'arcseconds':
-                cy = int(float(cy)/self.pixelscale + self.imgcy)
-                cx = int(float(cx)/self.pixelscale + self.imgcx)
+                cy = int((float(cy)/self.pixelscale) + (self.imgcy - 1))
+                cx = int((self.imgcx - 1) - (float(cx)/self.pixelscale))
                 com_img = np.zeros([2*cy,2*cx])
                 com_img[cy,cx] = 1
                 cy, cx = np.unravel_index(np.nanargmax(com_img), com_img.shape)
@@ -162,7 +162,7 @@ class EXTRACT:
             else:
                 raise ValueError("centre of mass units need to be either 'arcseconds' or 'pixels'")
 
-        print('center coordinates (pixels) =', com)
+        print('center coordinates (pixels) =', np.add(com,[1,1]))
 
         self.com = com
         self.M1p = M1p
@@ -463,10 +463,10 @@ class EXTRACT:
                 fig1 = ax.imshow(self.M1/1000, origin='lower', cmap=cm.RdBu_r, vmin=np.nanpercentile(self.M1p/1000,[1]), vmax=np.nanpercentile(self.M1p/1000,[99]))
                 if self.com_unit is not None and self.com_unit == 'arcseconds':
                     ax.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black',
-                        label=f'COM (y,x): [{self.com[0]},{self.com[1]}] pixels, \n [{self.cy_fixed},{self.cx_fixed}] $\Delta$arcs')
+                        label=f'COM (y,x): [{self.com[0]+1},{self.com[1]+1}] pixels, \n [{self.cy_fixed},{self.cx_fixed}] $\Delta$arcs')
                 else:
                     ax.plot(self.com[1], self.com[0], marker='.', markersize=10, color='black',
-                        label=f'COM (y,x): [{self.com[0]},{self.com[1]}] pixels, \n [{(self.com[0]-self.imgcy)*self.pixelscale:.3f},{(self.imgcx-self.com[1])*self.pixelscale:.3f}] $\Delta$arcs')
+                        label=f'COM (y,x): [{self.com[0]+1},{self.com[1]+1}] pixels, \n [{(self.com[0]-(self.imgcy-1))*self.pixelscale:.3f},{((self.imgcx-1)-self.com[1])*self.pixelscale:.3f}] $\Delta$arcs')
                 ax.set(xlabel='pixels', ylabel='pixels', title='dynamical centre')
                 ax.legend(loc='upper left', fontsize=8, framealpha=1.0)
                 divider = make_axes_locatable(ax)
