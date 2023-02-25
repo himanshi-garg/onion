@@ -608,9 +608,9 @@ class EXTRACT:
                     ax.plot(bins[0,:], bins[1,:], '.', markersize=8, color='navy', markeredgecolor='whitesmoke', markeredgewidth=0.3, label='avg. upper surface')
 
                     if k == 0:
-                        #with open(self.filename+'_traces_original.csv', 'w') as f:
-                        #    output_traces = np.column_stack((self.sR[:,:,0].flatten().tolist(), self.sH[:,:,0].flatten().tolist()))
-                        #    np.savetxt(f, output_traces, header='r, z', delimiter=",", fmt='%f')
+                        with open(self.filename+'_traces_prebinned.csv', 'w') as f:
+                            output_traces = np.column_stack((self.sR[:,:,0].flatten().tolist(), self.sH[:,:,0].flatten().tolist()))
+                            np.savetxt(f, output_traces, header='r, z', delimiter=",", fmt='%f')
                         with open(self.filename+'_traces_binned.csv', 'w') as f:
                             output_traces = np.column_stack((bins[0,:].tolist(), bins[1,:].tolist(), bins_std.tolist()))
                             np.savetxt(f, output_traces, header='binned_r, binned_z, binned_z_std', delimiter=",", fmt='%f')
